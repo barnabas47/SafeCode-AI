@@ -399,31 +399,32 @@ def index():
                         <!-- Stage 1 -->
                         <div class="p-4 rounded-2xl bg-slate-950/50 space-y-1.5 shadow-md">
                             <span class="text-xs font-black text-sky-400 uppercase tracking-wider block">Stage 1: Threat Architect Analysis</span>
-                            <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed font-medium">${data.architect_analysis}</p>
+                            <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed font-medium">${escapeHtml(data.architect_analysis || '')}</p>
                         </div>
 
                         <!-- Stage 2: Code Diff -->
                         <div class="p-4 rounded-2xl bg-slate-950/50 space-y-2 shadow-md">
                             <span class="text-xs font-black text-amber-400 uppercase tracking-wider block">Stage 2: Refactored Code (Zero Regression)</span>
-                            <pre><code class="language-python">${escapeHtml(data.patch_code)}</code></pre>
+                            <pre><code class="language-python">${escapeHtml(data.patch_code || '')}</code></pre>
                         </div>
 
                         <!-- Stage 3 & 4 Grid -->
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <div class="p-4 rounded-2xl bg-slate-950/50 shadow-md">
                                 <span class="text-xs font-black text-emerald-400 uppercase tracking-wider block mb-1">Stage 3: OpenShell Sandbox</span>
-                                <p class="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-medium">${data.sandbox_verification}</p>
+                                <p class="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-medium">${escapeHtml(data.sandbox_verification || '')}</p>
                             </div>
                             <div class="p-4 rounded-2xl bg-slate-950/50 shadow-md">
                                 <span class="text-xs font-black text-purple-400 uppercase tracking-wider block mb-1">Stage 4: Red-Team Attestation</span>
-                                <p class="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-medium">${data.red_team_attestation}</p>
+                                <p class="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-medium">${escapeHtml(data.red_team_attestation || '')}</p>
                             </div>
                         </div>
                     `;
 
                     Prism.highlightAll();
                 } catch(err) {
-                    resDiv.innerHTML = `<div class="p-4 rounded-2xl bg-rose-950/80 text-rose-300 text-sm font-semibold shadow-lg">Error: ${err.message}</div>`;
+                    console.error("SafeCode Patch Error:", err);
+                    resDiv.innerHTML = `<div class="p-4 rounded-2xl bg-rose-950/80 text-rose-300 text-sm font-semibold shadow-lg">Error: ${escapeHtml(err.message)}</div>`;
                 } finally {
                     btn.disabled = false;
                     btn.innerHTML = '<i class="fa-solid fa-shield-virus me-2"></i> Run 4-Stage Remediation Loop';
