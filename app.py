@@ -269,11 +269,11 @@ def index():
                 
                 if(type === 'sqli') {
                     desc.value = "SQL Injection via unsafe string interpolation in query_user_records";
-                    code.value = `def query_user_records(self, search_term: str, role_filter: str) -> List[Tuple[int, str, str, str]]:
-    cursor = self.db.cursor()
-    raw_sql = f"SELECT id, username, role, email FROM users WHERE username LIKE '%{search_term}%' AND role = '{role_filter}'"
-    cursor.execute(raw_sql)
-    return cursor.fetchall()`;
+                    code.value = "def query_user_records(self, search_term: str, role_filter: str) -> List[Tuple[int, str, str, str]]:\\n" +
+                        "    cursor = self.db.cursor()\\n" +
+                        "    raw_sql = f\\"SELECT id, username, role, email FROM users WHERE username LIKE '%{search_term}%' AND role = '{role_filter}'\\"\\n" +
+                        "    cursor.execute(raw_sql)\\n" +
+                        "    return cursor.fetchall()";
                     lang.innerText = "Python 3.12";
                 } else if(type === 'ssrf') {
                     desc.value = "SSRF vulnerability accessing internal cloud metadata endpoint";
