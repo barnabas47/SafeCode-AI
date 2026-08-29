@@ -81,6 +81,13 @@ class GitPushFileRequest(BaseModel):
     branch: Optional[str] = "main"
     token: Optional[str] = None
 
+class GitFixTxtRequest(BaseModel):
+    repo: str
+    vulnerability_title: str
+    patch_code: str
+    branch: Optional[str] = "safecode/audit-fixes"
+    token: Optional[str] = None
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     presets_json = json.dumps(PRESETS_DATA)
@@ -472,7 +479,10 @@ def index():
                                     <i class="fa-solid fa-copy text-xs"></i> Copy Fixed Code
                                 </button>
                                 <button id="btnPushFile" onclick="pushRefactoredCodeToGithub()" class="text-xs font-bold px-3 py-1 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 transition flex items-center gap-1.5 shadow-md cursor-pointer">
-                                    <i class="fa-solid fa-cloud-arrow-up text-xs text-sky-400"></i> Push Fixed File to GitHub
+                                    <i class="fa-solid fa-cloud-arrow-up text-xs text-sky-400"></i> Push File
+                                </button>
+                                <button id="btnAppendFixTxt" onclick="appendFixTxtToGithub()" class="text-xs font-bold px-3 py-1 rounded-xl bg-purple-950/90 hover:bg-purple-900 text-purple-300 transition flex items-center gap-1.5 shadow-md cursor-pointer">
+                                    <i class="fa-solid fa-file-pen text-xs text-amber-300"></i> Append Fix to branch (fix.txt)
                                 </button>
                             </div>
                         </div>
@@ -567,9 +577,45 @@ def index():
                     if (btn) btn.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-rose-400 me-1"></i> Push Failed';
                     alert("Upload failed: " + (data.message || data.error));
                 }}
+        async function appendFixTxtToGithub() {{
+            if (!window.currentPatchCode) return;
+            const repoInput = document.getElementById("gitRepo");
+            const tokenInput = document.getElementById("gitToken");
+            const defaultRepo = repoInput && repoInput.value ? repoInput.value : "barnabas47/nebius_test";
+            const token = tokenInput ? tokenInput.value : "";
+            const vulnTitle = document.getElementById("vulnDesc") ? document.getElementById("vulnDesc").value : "Security Audit Fix";
+
+            const targetRepo = prompt("Enter target GitHub repository (full URL or owner/repo):", defaultRepo);
+            if (!targetRepo) return;
+
+            const targetBranch = prompt("Enter target branch for fix.txt log (e.g. safecode/audit-fixes or main):", "safecode/audit-fixes") || "safecode/audit-fixes";
+
+            const btn = document.getElementById("btnAppendFixTxt");
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs me-1"></i> Appending to fix.txt...';
+
+            try {{
+                const res = await fetch("/api/git/push-fix-txt", {{
+                    method: "POST",
+                    headers: {{ "Content-Type": "application/json" }},
+                    body: JSON.stringify({{
+                        repo: targetRepo,
+                        vulnerability_title: vulnTitle,
+                        patch_code: window.currentPatchCode,
+                        branch: targetBranch,
+                        token: token
+                    }})
+                }});
+                const data = await res.json();
+                if (data.success) {{
+                    if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400 me-1"></i> Appended to fix.txt!';
+                    alert("Successfully appended remediation fix to fix.txt in branch '" + data.branch + "'!\\n\\nView on GitHub: " + data.html_url);
+                }} else {{
+                    if (btn) btn.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-rose-400 me-1"></i> Append Failed';
+                    alert("Append failed: " + (data.message || data.error));
+                }}
             }} catch(err) {{
                 if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-xmark text-rose-400 me-1"></i> Error';
-                alert("Error pushing to GitHub: " + err.message);
+                alert("Error appending to fix.txt: " + err.message);
             }}
         }}
 
@@ -655,6 +701,20 @@ def push_file_endpoint(req: GitPushFileRequest):
             file_path=req.file_path,
             file_content=req.file_content,
             commit_message=req.commit_message,
+            branch=req.branch,
+            token=req.token
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/git/push-fix-txt")
+def push_fix_txt_endpoint(req: GitFixTxtRequest):
+    try:
+        result = git_engine.append_fix_txt_to_github(
+            target_repo=req.repo,
+            vulnerability_title=req.vulnerability_title,
+            patch_code=req.patch_code,
             branch=req.branch,
             token=req.token
         )

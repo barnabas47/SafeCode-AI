@@ -414,3 +414,121 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
         except Exception as e:
             logger.error(f"Failed pushing to remote repository: {e}")
             return {"success": False, "error": str(e)}
+
+    def append_fix_txt_to_github(self, target_repo: str, vulnerability_title: str, patch_code: str, taxonomy_info: Dict[str, Any] = None, branch: str = "safecode/audit-fixes", token: str = None) -> Dict[str, Any]:
+        """
+        Creates or appends a refactored code entry to fix.txt in a dedicated GitHub branch (e.g. safecode/audit-fixes).
+        If fix.txt exists, it appends the new fix; if not, it creates fix.txt.
+        """
+        import datetime
+        import base64
+        import json
+        import urllib.request
+        import urllib.error
+
+        clean_repo = target_repo.replace("https://github.com/", "").strip("/")
+        if clean_repo.endswith(".git"):
+            clean_repo = clean_repo[:-4]
+        parts = clean_repo.split("/")
+        owner = parts[0] if len(parts) > 0 else ""
+        repo_name = parts[1] if len(parts) > 1 else clean_repo
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "SafeCode-AI-Engine"
+        }
+        if token and token.strip() and not token.startswith("ghp_xxx"):
+            headers["Authorization"] = f"Bearer {token.strip()}"
+
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/fix.txt"
+
+        # 1. Fetch existing fix.txt content if present
+        existing_content = ""
+        existing_sha = None
+        try:
+            req_get = urllib.request.Request(f"{url}?ref={branch}", headers=headers, method="GET")
+            with urllib.request.urlopen(req_get) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                existing_sha = data.get("sha")
+                if "content" in data:
+                    existing_content = base64.b64decode(data["content"]).decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+
+        # 2. Format new entry to append
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cat_name = (taxonomy_info or {}).get("category_name", "Security Vulnerability")
+        cwes = ", ".join((taxonomy_info or {}).get("cwe_list", ["CWE-UNKNOWN"]))
+
+        new_entry = f"""
+================================================================================
+SAFECODE-AI AUTONOMOUS REMEDIATION LOG
+TIMESTAMP: {timestamp}
+TITLE: {vulnerability_title}
+TAXONOMY: {cat_name} (CWEs: {cwes})
+--------------------------------------------------------------------------------
+REFACTORED CODE PATCH:
+{patch_code.strip()}
+================================================================================
+"""
+
+        full_content = (existing_content + "\n" + new_entry).strip()
+        b64_content = base64.b64encode(full_content.encode("utf-8")).decode("utf-8")
+
+        payload = {
+            "message": f"security(safecode): append remediation fix to fix.txt [{vulnerability_title[:30]}]",
+            "content": b64_content,
+            "branch": branch
+        }
+        if existing_sha:
+            payload["sha"] = existing_sha
+
+        payload_bytes = json.dumps(payload).encode("utf-8")
+        req_headers = {**headers, "Content-Type": "application/json"}
+
+        try:
+            req_put = urllib.request.Request(url, data=payload_bytes, headers=req_headers, method="PUT")
+            with urllib.request.urlopen(req_put) as resp:
+                res_data = json.loads(resp.read().decode("utf-8"))
+                content_info = res_data.get("content", {})
+                html_url = content_info.get("html_url", f"https://github.com/{owner}/{repo_name}/blob/{branch}/fix.txt")
+                return {
+                    "success": True,
+                    "target_repo": f"{owner}/{repo_name}",
+                    "branch": branch,
+                    "file_path": "fix.txt",
+                    "html_url": html_url,
+                    "message": f"Successfully appended remediation to fix.txt in branch '{branch}' (https://github.com/{owner}/{repo_name})"
+                }
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="ignore")
+            logger.error(f"GitHub API fix.txt Append HTTP {e.code}: {err_body}")
+
+            # If empty repo conflict (HTTP 409), retry without branch
+            if e.code == 409 or "empty" in err_body.lower():
+                try:
+                    payload_no_branch = {"message": f"security(safecode): initial fix.txt commit", "content": b64_content}
+                    req_retry = urllib.request.Request(url, data=json.dumps(payload_no_branch).encode("utf-8"), headers=req_headers, method="PUT")
+                    with urllib.request.urlopen(req_retry) as resp_retry:
+                        res_retry = json.loads(resp_retry.read().decode("utf-8"))
+                        content_retry = res_retry.get("content", {})
+                        return {
+                            "success": True,
+                            "target_repo": f"{owner}/{repo_name}",
+                            "branch": "main",
+                            "file_path": "fix.txt",
+                            "html_url": content_retry.get("html_url", f"https://github.com/{owner}/{repo_name}/blob/main/fix.txt"),
+                            "message": f"Successfully created fix.txt in repository https://github.com/{owner}/{repo_name}"
+                        }
+                except Exception as retry_err:
+                    logger.error(f"Retry on empty repo failed: {retry_err}")
+
+            return {
+                "success": False,
+                "target_repo": f"{owner}/{repo_name}",
+                "error": f"HTTP {e.code}: {err_body}",
+                "message": f"GitHub API HTTP {e.code}: {err_body}"
+            }
+        except Exception as e:
+            logger.error(f"GitHub API fix.txt Append failed: {e}")
+            return {"success": False, "error": str(e)}
