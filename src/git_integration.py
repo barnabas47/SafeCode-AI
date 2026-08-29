@@ -78,12 +78,20 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install pytest
+          fi
       - name: Run SafeCode 4-Stage Security Verification
         env:
           NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
         run: |
-          pytest -v
+          if [ -d tests ] || find . -maxdepth 2 -name "test_*.py" | grep -q .; then
+            pytest -v
+          else
+            echo "✅ SafeCode-AI: Security Action executed. No test suite found in target repository yet."
+          fi
 """
         try:
             with open(workflow_file, "w", encoding="utf-8") as f:

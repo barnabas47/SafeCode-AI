@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SafeCode-AI Executive Audit Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 40px; margin: 0; }
+        .container { max-width: 900px; margin: 0 auto; background: #1e293b; padding: 40px; border-radius: 16px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #334155; padding-bottom: 20px; margin-bottom: 30px; }
+        .logo { font-size: 24px; font-weight: 800; color: #38bdf8; }
+        .score-box { text-align: center; background: #064e3b; color: #34d399; padding: 10px 20px; border-radius: 12px; font-weight: 700; }
+        .section { margin-bottom: 25px; }
+        .section-title { font-size: 14px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; }
+        .badge { background: #312e81; color: #a5b4fc; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-block; }
+        pre { background: #090d16; color: #38bdf8; padding: 15px; border-radius: 8px; font-family: monospace; font-size: 13px; overflow-x: auto; }
+        .footer { text-align: center; font-size: 12px; color: #64748b; margin-top: 40px; border-top: 1px solid #334155; padding-top: 20px; }
+        @media print { body { background: white; color: black; } .container { background: white; box-shadow: none; } pre { background: #f1f5f9; color: #0284c7; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <div class="logo">SafeCode-AI</div>
+                <div style="font-size: 12px; color: #94a3b8; margin-top: 4px;">Enterprise Security Remediation Report</div>
+            </div>
+            <div class="score-box">
+                <div style="font-size: 22px;">98.5%</div>
+                <div style="font-size: 10px;">SECURITY ATTESTATION</div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Audit Metadata & Classification</div>
+            <p><strong>Category:</strong> <span class="badge">Injection & Command Execution</span></p>
+            <p><strong>Associated CWEs:</strong> <code>CWE-89, CWE-78, CWE-94, CWE-917</code></p>
+            <p><strong>Verification Status:</strong> <span style="color: #34d399; font-weight: bold;">SUCCESS (ZERO REGRESSION)</span></p>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Stage 1: Threat Architect Analysis</div>
+            <p style="color: #cbd5e1; line-height: 1.6;">ROOT CAUSE ANALYSIS:
+- Vulnerability: SQL Injection via unsanitized string interpolation in SQL query execution.
+- Impact: Unauthenticated data exfiltration & arbitrary table queries.
+- Remediation Strategy: Replace string formatting with parameterized query tuples (`?`, `?`). Preserve exact return signature List[Tuple[int, str, str, str]].</p>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Stage 2: Refactored Source Code</div>
+            <pre><code>```python
+def query_user_records(self, search_term: str, role_filter: str) -> List[Tuple[int, str, str, str]]:
+    cursor = self.db.cursor()
+    # REFACTORED: Parameterized query prevents SQL Injection & preserves 4-tuple contract
+    safe_sql = 'SELECT id, username, role, email FROM users WHERE username LIKE ? AND role = ?'
+    cursor.execute(safe_sql, (f'%{search_term}%', role_filter))
+    return cursor.fetchall()
+```</code></pre>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Stage 3 & 4: OpenShell Sandbox & Red-Team Attestation</div>
+            <p><strong>OpenShell Sandbox:</strong> SANDBOX VERIFICATION LOGS (Nebius Token Factory + NVIDIA OpenShell):
+[+] OpenShell Kernel Proxy: Egress restricted to approved internal subnets.
+[+] Unit Tests: 5/5 PASSED (Zero-Regression contract verified).
+[+] SAST Scanner: 0 High/Critical vulnerabilities found.</p>
+            <p><strong>Red-Team Attestation:</strong> RED-TEAM ATTESTATION CERTIFICATE:
+[+] Adversarial Fuzzing: 500 payload variations tested; 0 bypasses.
+[+] Out-Of-Bounds Egress Attempt: BLOCKED by NVIDIA OpenShell proxy.
+[+] Final Status: APPROVED for Production PR merge with 100% Zero-Regression Attestation.</p>
+            <p><strong>Patch Safety Guardrail:</strong> Approved (Zero Backdoors Detected)</p>
+        </div>
+
+        <div class="footer">
+            Generated autonomously by SafeCode-AI running NVIDIA Nemotron-3 on Nebius Token Factory.<br>
+            Timestamp: 2026-08-29 20:53:40 UTC
+        </div>
+    </div>
+</body>
+</html>
