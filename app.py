@@ -68,6 +68,11 @@ class KnowledgeIngestionRequest(BaseModel):
     sample_code: str
     category: Optional[str] = "INJECTION"
 
+class GitInstallRequest(BaseModel):
+    repo: Optional[str] = "barnabas47/SafeCode-AI"
+    branch: Optional[str] = "main"
+    token: Optional[str] = None
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     presets_json = json.dumps(PRESETS_DATA)
@@ -355,26 +360,31 @@ def index():
             const statusDiv = document.getElementById("gitStatus");
             const repo = document.getElementById("gitRepo").value;
             const branch = document.getElementById("gitBranch").value;
+            const token = document.getElementById("gitToken").value;
             
-            statusDiv.innerHTML = '<div class="text-amber-400 font-semibold mt-2"><i class="fa-solid fa-spinner fa-spin me-1.5"></i> Installing hooks & generating GitHub Actions...</div>';
+            statusDiv.innerHTML = '<div class="text-amber-400 font-semibold mt-2"><i class="fa-solid fa-spinner fa-spin me-1.5"></i> Generating CI/CD workflow & pushing to remote GitHub...</div>';
             
             try {{
                 const res = await fetch("/api/git/install-hook", {{
                     method: "POST",
                     headers: {{ "Content-Type": "application/json" }},
-                    body: JSON.stringify({{ repo, branch }})
+                    body: JSON.stringify({{ repo, branch, token }})
                 }});
                 const data = await res.json();
+                const pushInfo = data.push_status || {{}};
                 
+                let pushMsg = pushInfo.success 
+                    ? `<div class="text-emerald-300 font-bold"><i class="fa-solid fa-cloud-arrow-up me-1"></i> Pushed to GitHub: <a href="${{escapeHtml(pushInfo.target_url || '#')}}" target="_blank" class="underline text-sky-300">${{escapeHtml(repo)}}</a></div>`
+                    : `<div class="text-amber-300 text-[11px]"><i class="fa-solid fa-triangle-exclamation me-1"></i> Workflow generated locally. To push to <b>${{escapeHtml(repo)}}</b>, provide a GitHub Access Token with repo permissions.</div>`;
+
                 statusDiv.innerHTML = `
                     <div class="p-3 rounded-xl bg-emerald-950/80 text-emerald-300 space-y-1.5 shadow-md mt-2">
-                        <div class="font-bold flex items-center gap-1.5"><i class="fa-solid fa-circle-check"></i> Git CI/CD Setup Installed Successfully!</div>
+                        <div class="font-bold flex items-center gap-1.5"><i class="fa-solid fa-circle-check"></i> Git CI/CD Integration Completed!</div>
                         <div>1. Pre-Commit Hook: <code class="text-xs font-mono text-slate-200">.git/hooks/pre-commit</code></div>
                         <div>2. GitHub Action: <code class="text-xs font-mono text-slate-200">.github/workflows/safecode-audit.yml</code></div>
-                        <div>3. Remote Target: <span class="font-semibold text-amber-300">${{escapeHtml(repo)}}</span> (branch: ${{escapeHtml(branch)}})</div>
+                        ${{pushMsg}}
                     </div>
                 `;
-                setTimeout(closeGitModal, 3500);
             }} catch(err) {{
                 statusDiv.innerHTML = `<div class="text-rose-400 mt-2 font-semibold">Install Failed: ${{escapeHtml(err.message)}}</div>`;
             }}
@@ -561,13 +571,21 @@ def learn_vulnerability_endpoint(req: KnowledgeIngestionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/git/install-hook")
-def install_git_hook_endpoint():
+def install_git_hook_endpoint(req: Optional[GitInstallRequest] = None):
     try:
         hook_res = git_engine.install_pre_commit_hook()
         wf_res = git_engine.generate_github_action()
+
+        target_repo = req.repo if req and req.repo else "barnabas47/SafeCode-AI"
+        target_branch = req.branch if req and req.branch else "main"
+        target_token = req.token if req else None
+
+        push_res = git_engine.push_to_remote_github(target_repo, target_branch, target_token)
+
         return {
             "hook_status": hook_res,
-            "workflow_status": wf_res
+            "workflow_status": wf_res,
+            "push_status": push_res
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
