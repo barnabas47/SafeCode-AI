@@ -385,9 +385,13 @@ def index():
                     ? `<div class="text-emerald-300 font-bold flex items-center gap-1.5"><i class="fa-solid fa-cloud-arrow-up"></i> Pushed to GitHub: <a href="${{escapeHtml(pushInfo.target_url || '#')}}" target="_blank" class="underline text-sky-300 font-bold">${{escapeHtml(repo)}}</a></div>`
                     : `<div class="text-rose-300 text-[11px] bg-rose-950/60 p-2.5 rounded-xl border border-rose-800/40 leading-relaxed mt-1"><i class="fa-solid fa-circle-xmark text-rose-400 me-1"></i> ${{escapeHtml(pushInfo.message || pushInfo.error || "Push failed")}}</div>`;
 
+                const isSuccess = pushInfo.success;
+                const headerColor = isSuccess ? "bg-emerald-950/80 text-emerald-300 border-emerald-800/40" : "bg-rose-950/80 text-rose-300 border-rose-800/40";
+                const headerIcon = isSuccess ? '<i class="fa-solid fa-circle-check text-emerald-400"></i> Git Remote Push Succeeded!' : '<i class="fa-solid fa-circle-xmark text-rose-400"></i> Git Remote Push Failed';
+
                 statusDiv.innerHTML = `
-                    <div class="p-3 rounded-xl bg-emerald-950/80 text-emerald-300 space-y-1.5 shadow-md mt-2">
-                        <div class="font-bold flex items-center gap-1.5"><i class="fa-solid fa-circle-check"></i> Git CI/CD Integration Completed!</div>
+                    <div class="p-3 rounded-xl ${{headerColor}} border space-y-1.5 shadow-md mt-2">
+                        <div class="font-bold flex items-center gap-1.5">${{headerIcon}}</div>
                         <div>1. Pre-Commit Hook: <code class="text-xs font-mono text-slate-200">.git/hooks/pre-commit</code></div>
                         <div>2. GitHub Action: <code class="text-xs font-mono text-slate-200">.github/workflows/safecode-audit.yml</code></div>
                         ${{pushMsg}}

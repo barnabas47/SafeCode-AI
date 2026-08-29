@@ -258,7 +258,9 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
         import urllib.request
         import urllib.error
 
-        clean_repo = target_repo.replace("https://github.com/", "").strip("/").rstrip(".git")
+        clean_repo = target_repo.replace("https://github.com/", "").strip("/")
+        if clean_repo.endswith(".git"):
+            clean_repo = clean_repo[:-4]
         parts = clean_repo.split("/")
         owner = parts[0] if len(parts) > 0 else ""
         repo_name = parts[1] if len(parts) > 1 else clean_repo
@@ -351,7 +353,9 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
         """
         Commits .github/workflows/safecode-audit.yml and uploads it to target GitHub repository via API or Git CLI.
         """
-        clean_repo = target_repo.replace("https://github.com/", "").strip("/").rstrip(".git")
+        clean_repo = target_repo.replace("https://github.com/", "").strip("/")
+        if clean_repo.endswith(".git"):
+            clean_repo = clean_repo[:-4]
         if not clean_repo:
             return {"success": False, "error": "Invalid repository format"}
 
