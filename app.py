@@ -186,10 +186,21 @@ def index():
                         <span id="langLabel" class="text-xs text-slate-500 font-mono font-semibold">Python 3.12</span>
                     </div>
                     
-                    <div>
-                        <label class="text-xs font-bold text-slate-400 mb-1.5 block uppercase tracking-wider">Vulnerability Description:</label>
-                        <input type="text" id="vulnDesc" class="w-full bg-slate-950/80 text-slate-200 text-sm px-4 py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-sky-500/40 transition" 
-                               value="SQL Injection via unsafe string interpolation in query_user_records">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-xs font-bold text-slate-400 mb-1.5 block uppercase tracking-wider">Vulnerability Description:</label>
+                            <input type="text" id="vulnDesc" class="w-full bg-slate-950/80 text-slate-200 text-sm px-4 py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-sky-500/40 transition" 
+                                   value="SQL Injection via unsafe string interpolation in query_user_records">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-slate-400 mb-1.5 block uppercase tracking-wider">Remediation Strategy:</label>
+                            <select id="remediationStrategy" class="w-full bg-slate-950/80 text-sky-300 text-xs px-4 py-3 rounded-xl shadow-inner focus:ring-2 focus:ring-sky-500/40 transition font-semibold">
+                                <option value="auto">⚡ Auto (Best Security Pattern)</option>
+                                <option value="parameterized">🔒 Parameterized Query / Type-Safe Tuple</option>
+                                <option value="domain_whitelist">🌐 Domain Whitelist & Metadata Isolation</option>
+                                <option value="safe_deserialization">📦 Type-Safe JSON Deserialization</option>
+                            </select>
+                        </div>
                     </div>
 
                     <div>
