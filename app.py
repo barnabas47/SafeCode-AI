@@ -421,10 +421,17 @@ def index():
                         </div>
                     `;
 
-                    Prism.highlightAll();
+                    console.log("SafeCode Patch Result:", data);
+                    try {
+                        if (window.Prism) { Prism.highlightAll(); }
+                    } catch(pErr) {
+                        console.warn("Prism syntax highlight warning:", pErr);
+                    }
                 } catch(err) {
-                    console.error("SafeCode Patch Error:", err);
-                    resDiv.innerHTML = `<div class="p-4 rounded-2xl bg-rose-950/80 text-rose-300 text-sm font-semibold shadow-lg">Error: ${escapeHtml(err.message)}</div>`;
+                    console.error("SafeCode Patch Execution Error:", err);
+                    resDiv.innerHTML = `<div class="p-4 rounded-2xl bg-rose-950/80 text-rose-300 text-sm font-semibold shadow-lg">
+                        <i class="fa-solid fa-triangle-exclamation me-2"></i>Error Executing Audit: ${escapeHtml(err.message || String(err))}
+                    </div>`;
                 } finally {
                     btn.disabled = false;
                     btn.innerHTML = '<i class="fa-solid fa-shield-virus me-2"></i> Run 4-Stage Remediation Loop';
