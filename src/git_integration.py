@@ -139,11 +139,17 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
         """
         Uses GitHub REST API (PUT /repos/{owner}/{repo}/contents/{path}) to directly upload
         .github/workflows/safecode-audit.yml into any target repository without git history conflicts.
+        Supports auto-creating missing repositories if token is provided.
         """
         import json
         import base64
         import urllib.request
         import urllib.error
+
+        clean_repo = clean_repo.replace("https://github.com/", "").strip("/").rstrip(".git")
+        parts = clean_repo.split("/")
+        owner = parts[0] if len(parts) > 0 else ""
+        repo_name = parts[1] if len(parts) > 1 else clean_repo
 
         workflow_file = os.path.join(self.repo_dir, ".github", "workflows", "safecode-audit.yml")
         if not os.path.exists(workflow_file):
@@ -154,7 +160,6 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
 
         b64_content = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
 
-        url = f"https://api.github.com/repos/{clean_repo}/contents/.github/workflows/safecode-audit.yml"
         headers = {
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "SafeCode-AI-Engine"
@@ -162,7 +167,25 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
         if token and token.strip() and not token.startswith("ghp_xxx"):
             headers["Authorization"] = f"Bearer {token.strip()}"
 
-        # Check if file exists to fetch existing sha for updating
+        # 1. Check if repo exists; if 404 and token is provided, attempt auto-creation
+        try:
+            repo_check_url = f"https://api.github.com/repos/{owner}/{repo_name}"
+            req_repo = urllib.request.Request(repo_check_url, headers=headers, method="GET")
+            urllib.request.urlopen(req_repo)
+        except urllib.error.HTTPError as err:
+            if err.code == 404 and token and token.strip() and not token.startswith("ghp_xxx"):
+                try:
+                    create_url = "https://api.github.com/user/repos"
+                    create_payload = json.dumps({"name": repo_name, "private": False, "auto_init": True}).encode("utf-8")
+                    req_create = urllib.request.Request(create_url, data=create_payload, headers={**headers, "Content-Type": "application/json"}, method="POST")
+                    urllib.request.urlopen(req_create)
+                    logger.info(f"Auto-created GitHub repository https://github.com/{owner}/{repo_name}")
+                except Exception as create_err:
+                    logger.warning(f"Auto-create repository failed: {create_err}")
+
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/.github/workflows/safecode-audit.yml"
+
+        # 2. Check if file exists to fetch existing sha for updating
         existing_sha = None
         try:
             req_get = urllib.request.Request(f"{url}?ref={branch}", headers=headers, method="GET")
@@ -181,10 +204,10 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
             payload["sha"] = existing_sha
 
         payload_bytes = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
+        req_headers = {**headers, "Content-Type": "application/json"}
 
         try:
-            req_put = urllib.request.Request(url, data=payload_bytes, headers=headers, method="PUT")
+            req_put = urllib.request.Request(url, data=payload_bytes, headers=req_headers, method="PUT")
             with urllib.request.urlopen(req_put) as resp:
                 res_data = json.loads(resp.read().decode("utf-8"))
                 commit_html = res_data.get("commit", {}).get("html_url", f"https://github.com/{clean_repo}")
@@ -198,11 +221,12 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="ignore")
             logger.error(f"GitHub API Upload HTTP {e.code}: {err_body}")
+            msg = f"GitHub API HTTP {e.code}: Repository '{clean_repo}' not found on GitHub. Check repository name or token permissions." if e.code == 404 else f"GitHub API HTTP {e.code}: Token authentication error."
             return {
                 "success": False,
                 "target_repo": clean_repo,
                 "error": f"HTTP {e.code}: {err_body}",
-                "message": f"GitHub API returned HTTP {e.code}. Check repository permissions or token validity."
+                "message": msg
             }
         except Exception as e:
             logger.error(f"GitHub API Upload failed: {e}")

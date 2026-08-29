@@ -374,8 +374,8 @@ def index():
                 const pushInfo = data.push_status || {{}};
                 
                 let pushMsg = pushInfo.success 
-                    ? `<div class="text-emerald-300 font-bold"><i class="fa-solid fa-cloud-arrow-up me-1"></i> Pushed to GitHub: <a href="${{escapeHtml(pushInfo.target_url || '#')}}" target="_blank" class="underline text-sky-300">${{escapeHtml(repo)}}</a></div>`
-                    : `<div class="text-amber-300 text-[11px]"><i class="fa-solid fa-triangle-exclamation me-1"></i> Workflow generated locally. To push to <b>${{escapeHtml(repo)}}</b>, provide a GitHub Access Token with repo permissions.</div>`;
+                    ? `<div class="text-emerald-300 font-bold flex items-center gap-1.5"><i class="fa-solid fa-cloud-arrow-up"></i> Pushed to GitHub: <a href="${{escapeHtml(pushInfo.target_url || '#')}}" target="_blank" class="underline text-sky-300 font-bold">${{escapeHtml(repo)}}</a></div>`
+                    : `<div class="text-rose-300 text-[11px] bg-rose-950/60 p-2.5 rounded-xl border border-rose-800/40 leading-relaxed mt-1"><i class="fa-solid fa-circle-xmark text-rose-400 me-1"></i> ${{escapeHtml(pushInfo.message || pushInfo.error || "Push failed")}}</div>`;
 
                 statusDiv.innerHTML = `
                     <div class="p-3 rounded-xl bg-emerald-950/80 text-emerald-300 space-y-1.5 shadow-md mt-2">
