@@ -9,6 +9,9 @@ logger = logging.getLogger("SafeCodeAgent")
 from src.rules.vulnerability_taxonomy import VulnerabilityTaxonomyManager
 from src.rules.threat_intel_syncer import ThreatIntelSyncer
 from src.rules.zero_day_discovery import ZeroDayDiscoveryEngine
+from src.rules.patch_guardrail import PatchGuardrailEngine
+from src.reports.report_generator import SecurityReportGenerator
+from src.git_integration import GitIntegrationEngine
 
 class SafeCodeAgent:
     """
@@ -16,7 +19,7 @@ class SafeCodeAgent:
     Demonstrates Coding & Agentic Engineering Track requirements:
     Executes in Token Factory Sandboxes with OpenShell proxy security.
     Integrated with OWASP/CWE Taxonomy, Threat Intel Feeds (NVD/OSV/GHSA),
-    and Zero-Day Autonomous Discovery Engine.
+    Zero-Day Autonomous Discovery Engine, AI Patch Guardrails, and Git PR Generator.
     """
 
     def __init__(self, nebius_client: NebiusTokenFactoryClient = None):
@@ -24,6 +27,9 @@ class SafeCodeAgent:
         self.taxonomy = VulnerabilityTaxonomyManager()
         self.intel_syncer = ThreatIntelSyncer()
         self.zero_day_engine = ZeroDayDiscoveryEngine()
+        self.guardrail_engine = PatchGuardrailEngine()
+        self.report_generator = SecurityReportGenerator()
+        self.git_engine = GitIntegrationEngine()
 
     def audit_and_patch(self, code_snippet: str, vulnerability_desc: str) -> Dict[str, Any]:
         logger.info("Initiating 4-stage closed-loop security audit and patch in Nebius Token Factory Sandbox...")
@@ -82,6 +88,10 @@ class SafeCodeAgent:
             system_prompt="You are a Senior Patch Engineer generating secure, minimal code refactors."
         )
 
+        # Stage 2.5: AI Patch Safety & Backdoor Guardrail Scan
+        guardrail_res = self.guardrail_engine.audit_patch(code_snippet, patch_code)
+        logger.info(f"Patch Guardrail Evaluation: Safe={guardrail_res['is_safe']} (Risk Score: {guardrail_res['risk_score']})")
+
         # Stage 3: Isolated Sandbox & Verification Agent (Nemotron-3 Nano + OpenShell)
         sandbox_prompt = f"""
         [Stage 3: Sandbox Verification]
@@ -110,10 +120,12 @@ class SafeCodeAgent:
             system_prompt="You are a Red-Team Security Specialist performing adversarial validation."
         )
 
-        return {
-            "status": "SUCCESS",
+        # Construct audit result object
+        result_payload = {
+            "status": "SUCCESS" if guardrail_res["is_safe"] else "GUARDRAIL_VIOLATION",
             "threat_intel_sync": sync_res,
             "zero_day_discovery": zero_day_res,
+            "patch_guardrail": guardrail_res,
             "taxonomy_classification": {
                 "category_key": cat_key,
                 "category_name": cat_name,
@@ -125,9 +137,20 @@ class SafeCodeAgent:
             "security_layer": "NVIDIA OpenShell Egress Proxy & Kernel Sandbox",
             "primary_model": settings.MODEL_ULTRA,
             "fast_verifier_model": settings.MODEL_NANO,
+            "original_code": code_snippet,
             "architect_analysis": architect_analysis,
             "patch_code": patch_code,
             "sandbox_verification": sandbox_verification,
             "red_team_attestation": red_team_attestation,
             "patch_result": patch_code  # Retained for strict backward compatibility
         }
+
+        # Step 5A: Generate Executive HTML/PDF Security Audit Report
+        report_info = self.report_generator.generate_report(result_payload)
+        result_payload["executive_report"] = report_info
+
+        # Step 5B: Generate Git Pull Request Payload
+        pr_payload = self.git_engine.generate_pull_request_payload(result_payload)
+        result_payload["git_pull_request"] = pr_payload
+
+        return result_payload

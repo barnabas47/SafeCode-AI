@@ -1,21 +1,27 @@
 from fastapi import FastAPI, BackgroundTasks, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
+import os
+
 from src.agents.omniclaim_agent import OmniClaimAgent
 from src.agents.safecode_agent import SafeCodeAgent
 from src.serverless.jobs_runner import NebiusServerlessJobRunner
+from src.rules.custom_knowledge_ingestion import CustomKnowledgeIngestionEngine
+from src.git_integration import GitIntegrationEngine
 from src.config import settings
 
 app = FastAPI(
-    title="Nebius x NVIDIA Global AI Hackathon Showcase",
+    title="SafeCode-AI Enterprise Security Platform",
     description="Multi-Agent AI Platform running NVIDIA Nemotron models on Nebius Token Factory & Serverless Infrastructure.",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 omni_agent = OmniClaimAgent()
 safe_agent = SafeCodeAgent()
 job_runner = NebiusServerlessJobRunner()
+knowledge_engine = CustomKnowledgeIngestionEngine()
+git_engine = GitIntegrationEngine()
 
 class ClaimRequest(BaseModel):
     claim_id: str
@@ -26,6 +32,12 @@ class ClaimRequest(BaseModel):
 class CodePatchRequest(BaseModel):
     code_snippet: str
     vulnerability: str
+
+class KnowledgeIngestionRequest(BaseModel):
+    title: str
+    description: str
+    sample_code: str
+    category: Optional[str] = "INJECTION"
 
 @app.get("/", response_class=HTMLResponse)
 def index():
@@ -76,6 +88,12 @@ def index():
                     </div>
                 </div>
                 <div class="flex items-center gap-3">
+                    <button onclick="openKnowledgeModal()" class="text-xs font-bold bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 px-3.5 py-2 rounded-xl shadow-md transition flex items-center gap-2">
+                        <i class="fa-solid fa-brain text-sky-400"></i> Learn Custom Rule
+                    </button>
+                    <button onclick="installGitIntegration()" class="text-xs font-bold bg-slate-900/80 hover:bg-slate-800 text-slate-200 px-3.5 py-2 rounded-xl shadow-md transition flex items-center gap-2">
+                        <i class="fa-brands fa-git-alt text-orange-400"></i> Install CI/CD Hooks
+                    </button>
                     <span class="flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-900/80 px-4 py-2 rounded-full shadow-lg shadow-black/30">
                         <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400"></span>
                         Nebius Token Factory + NVIDIA Nemotron-3
@@ -108,17 +126,20 @@ def index():
                 <!-- Preset Sample Selector Pills -->
                 <div class="flex items-center justify-between flex-wrap gap-3 glass p-4 rounded-2xl shadow-xl shadow-black/30">
                     <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-                        <i class="fa-solid fa-wand-magic-sparkles text-sky-400"></i> Sample Benchmarks:
+                        <i class="fa-solid fa-wand-magic-sparkles text-sky-400"></i> Sample Benchmarks (Python, JS/TS, Go):
                     </span>
                     <div class="flex items-center gap-2 flex-wrap">
                         <button onclick="loadPreset('sqli')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900/80 hover:bg-sky-900/60 hover:text-sky-300 text-slate-300 transition shadow-md">
-                            SQL Injection
+                            Python SQLi
                         </button>
                         <button onclick="loadPreset('ssrf')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900/80 hover:bg-sky-900/60 hover:text-sky-300 text-slate-300 transition shadow-md">
-                            SSRF Metadata
+                            Python SSRF
                         </button>
-                        <button onclick="loadPreset('cmd')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900/80 hover:bg-sky-900/60 hover:text-sky-300 text-slate-300 transition shadow-md">
-                            Command Injection
+                        <button onclick="loadPreset('node')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900/80 hover:bg-sky-900/60 hover:text-sky-300 text-slate-300 transition shadow-md">
+                            Node.js Exec Injection
+                        </button>
+                        <button onclick="loadPreset('go')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900/80 hover:bg-sky-900/60 hover:text-sky-300 text-slate-300 transition shadow-md">
+                            Go SQL Sprintf
                         </button>
                         <button onclick="loadPreset('pickle')" class="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900/80 hover:bg-sky-900/60 hover:text-sky-300 text-slate-300 transition shadow-md">
                             Pickle RCE
@@ -133,7 +154,7 @@ def index():
                             <span class="text-sm font-bold text-slate-200 flex items-center gap-2">
                                 <i class="fa-solid fa-terminal text-sky-400"></i> Vulnerable Source Code
                             </span>
-                            <span class="text-xs text-slate-500 font-mono font-semibold">Python 3.12</span>
+                            <span id="langLabel" class="text-xs text-slate-500 font-mono font-semibold">Python / Polyglot</span>
                         </div>
                         
                         <div>
@@ -161,11 +182,16 @@ def index():
                     <div class="glass-card rounded-3xl p-6 space-y-4 shadow-2xl shadow-black/50">
                         <div class="flex items-center justify-between">
                             <span class="text-sm font-bold text-slate-200 flex items-center gap-2">
-                                <i class="fa-solid fa-microchip text-indigo-400"></i> Verification Timeline & Output
+                                <i class="fa-solid fa-microchip text-indigo-400"></i> Verification Timeline & Report
                             </span>
-                            <span id="badgeStatus" class="hidden text-xs font-extrabold px-3.5 py-1 rounded-full bg-emerald-950/80 text-emerald-300 shadow-md">
-                                ZERO REGRESSION PASSED
-                            </span>
+                            <div class="flex items-center gap-2">
+                                <a id="btnDownloadReport" target="_blank" class="hidden text-xs font-extrabold px-3 py-1.5 rounded-xl bg-sky-900/60 hover:bg-sky-800 text-sky-200 transition flex items-center gap-1.5 shadow-md">
+                                    <i class="fa-solid fa-file-pdf"></i> Download PDF Report
+                                </a>
+                                <span id="badgeStatus" class="hidden text-xs font-extrabold px-3.5 py-1 rounded-full bg-emerald-950/80 text-emerald-300 shadow-md">
+                                    ZERO REGRESSION PASSED
+                                </span>
+                            </div>
                         </div>
 
                         <div id="stageResults" class="space-y-4 min-h-[380px] flex flex-col justify-center">
@@ -194,6 +220,26 @@ def index():
             </div>
         </div>
 
+        <!-- Custom Knowledge Ingestion Modal -->
+        <div id="modalKnowledge" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+            <div class="glass-card rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-bold text-white"><i class="fa-solid fa-brain text-sky-400 me-2"></i>Ingest Custom Vulnerability Rule</h3>
+                    <button onclick="closeKnowledgeModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+                </div>
+                <div class="space-y-3">
+                    <input type="text" id="customTitle" placeholder="Vulnerability Title (e.g. Custom Auth Bypass)" class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner">
+                    <input type="text" id="customCat" placeholder="Category (INJECTION, CRYPTOGRAPHY_CREDENTIALS, etc.)" class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner" value="INJECTION">
+                    <textarea id="customDesc" rows="3" placeholder="Vulnerability Description..." class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner"></textarea>
+                    <textarea id="customCode" rows="4" placeholder="Sample Vulnerable Code..." class="w-full bg-slate-950 text-sky-300 font-mono text-xs p-3 rounded-xl shadow-inner"></textarea>
+                </div>
+                <button onclick="submitKnowledgeIngestion()" class="w-full py-3 rounded-xl font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-lg transition">
+                    Submit & Auto-Synthesize Rule
+                </button>
+                <div id="knowledgeStatus" class="text-xs"></div>
+            </div>
+        </div>
+
         <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-python.min.js"></script>
         <script>
@@ -219,6 +265,7 @@ def index():
             function loadPreset(type) {
                 const desc = document.getElementById("vulnDesc");
                 const code = document.getElementById("codeSnippet");
+                const lang = document.getElementById("langLabel");
                 
                 if(type === 'sqli') {
                     desc.value = "SQL Injection via unsafe string interpolation in query_user_records";
@@ -227,14 +274,33 @@ def index():
     raw_sql = f"SELECT id, username, role, email FROM users WHERE username LIKE '%{search_term}%' AND role = '{role_filter}'"
     cursor.execute(raw_sql)
     return cursor.fetchall()`;
+                    lang.innerText = "Python 3.12";
                 } else if(type === 'ssrf') {
                     desc.value = "SSRF vulnerability accessing internal cloud metadata endpoint";
                     code.value = `def fetch_url(url: str):
     return requests.get(url, timeout=5).text`;
-                } else if(type === 'cmd') {
-                    desc.value = "Command Injection vulnerability via unsanitized os.system call";
-                    code.value = `def ping_host(host: str):
-    return os.system("ping " + host)`;
+                    lang.innerText = "Python 3.12";
+                } else if(type === 'node') {
+                    desc.value = "Command Injection via child_process.exec in Express route";
+                    code.value = `app.get('/api/ping', (req, res) => {
+    const host = req.query.host;
+    // VULNERABLE: Command Injection in Node.js
+    exec("ping -c 1 " + host, (err, stdout) => {
+        res.send(stdout);
+    });
+});`;
+                    lang.innerText = "JavaScript / Node.js";
+                } else if(type === 'go') {
+                    desc.value = "SQL Injection via fmt.Sprintf in Go GORM / SQL driver";
+                    code.value = `func SearchUser(db *sql.DB, username string) (*User, error) {
+    // VULNERABLE: Direct string format in Go SQL query
+    query := fmt.Sprintf("SELECT id, username, email FROM users WHERE username = '%s'", username)
+    row := db.QueryRow(query)
+    var u User
+    err := row.Scan(&u.ID, &u.Username, &u.Email)
+    return &u, err
+}`;
+                    lang.innerText = "Go (Golang)";
                 } else if(type === 'pickle') {
                     desc.value = "Unsafe deserialization using pickle.loads before type validation";
                     code.value = `def process_event(payload: bytes):
@@ -242,6 +308,43 @@ def index():
     if not isinstance(event, InvoiceEvent):
         raise ValueError("Unexpected event type")
     return event`;
+                    lang.innerText = "Python 3.12";
+                }
+            }
+
+            function openKnowledgeModal() { document.getElementById("modalKnowledge").classList.remove("hidden"); }
+            function closeKnowledgeModal() { document.getElementById("modalKnowledge").classList.add("hidden"); }
+
+            async function submitKnowledgeIngestion() {
+                const statusDiv = document.getElementById("knowledgeStatus");
+                statusDiv.innerHTML = '<span class="text-sky-400 font-semibold"><i class="fa-solid fa-spinner fa-spin me-1"></i> Synthesizing rules with Nemotron-3 Ultra...</span>';
+                try {
+                    const res = await fetch("/api/knowledge/learn", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            title: document.getElementById("customTitle").value,
+                            category: document.getElementById("customCat").value,
+                            description: document.getElementById("customDesc").value,
+                            sample_code: document.getElementById("customCode").value
+                        })
+                    });
+                    const data = await res.json();
+                    statusDiv.innerHTML = `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check me-1"></i> ${data.message}</span>`;
+                    setTimeout(closeKnowledgeModal, 2000);
+                } catch(err) {
+                    statusDiv.innerHTML = `<span class="text-rose-400">Error: ${err.message}</span>`;
+                }
+            }
+
+            async function installGitIntegration() {
+                alert("Installing SafeCode-AI Pre-Commit Hook & GitHub Action Workflow...");
+                try {
+                    const res = await fetch("/api/git/install-hook", { method: "POST" });
+                    const data = await res.json();
+                    alert("Git Integration Installed Successfully!\n\n1. Pre-commit Hook: " + (data.hook_status.message || "Installed") + "\n2. GitHub Action: " + (data.workflow_status.message || "Generated"));
+                } catch(e) {
+                    alert("Git Install Failed: " + e.message);
                 }
             }
 
@@ -249,10 +352,12 @@ def index():
                 const btn = document.getElementById("btnPatch");
                 const resDiv = document.getElementById("stageResults");
                 const badge = document.getElementById("badgeStatus");
+                const btnPdf = document.getElementById("btnDownloadReport");
                 
                 btn.disabled = true;
                 btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Executing Multi-Agent Pipeline...';
                 badge.classList.add("hidden");
+                btnPdf.classList.add("hidden");
 
                 resDiv.innerHTML = `
                     <div class="p-6 rounded-2xl bg-slate-950/80 text-slate-300 space-y-3 shadow-lg">
@@ -275,6 +380,11 @@ def index():
                     const data = await response.json();
                     badge.classList.remove("hidden");
 
+                    if(data.executive_report && data.executive_report.filename) {
+                        btnPdf.href = `/api/report/download/${data.executive_report.filename}`;
+                        btnPdf.classList.remove("hidden");
+                    }
+
                     const catInfo = data.taxonomy_classification || {};
 
                     resDiv.innerHTML = `
@@ -288,7 +398,7 @@ def index():
 
                         <!-- Stage 1 -->
                         <div class="p-4 rounded-2xl bg-slate-950/50 space-y-1.5 shadow-md">
-                            <span class="text-xs font-black text-sky-400 uppercase tracking-wider block">Stage 1: Threat Architect</span>
+                            <span class="text-xs font-black text-sky-400 uppercase tracking-wider block">Stage 1: Threat Architect Analysis</span>
                             <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed font-medium">${data.architect_analysis}</p>
                         </div>
 
@@ -365,6 +475,38 @@ def code_patch_endpoint(req: CodePatchRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/knowledge/learn")
+def learn_vulnerability_endpoint(req: KnowledgeIngestionRequest):
+    try:
+        result = knowledge_engine.learn_custom_vulnerability(
+            title=req.title,
+            description=req.description,
+            sample_code=req.sample_code,
+            category=req.category
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/git/install-hook")
+def install_git_hook_endpoint():
+    try:
+        hook_res = git_engine.install_pre_commit_hook()
+        wf_res = git_engine.generate_github_action()
+        return {
+            "hook_status": hook_res,
+            "workflow_status": wf_res
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/report/download/{filename}")
+def download_report_endpoint(filename: str):
+    file_path = os.path.join("reports", filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Report file not found")
+    return FileResponse(file_path, media_type="text/html", filename=filename)
 
 @app.post("/api/serverless/job")
 def create_job_endpoint(claims: List[ClaimRequest]):
