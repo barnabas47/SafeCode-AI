@@ -1,0 +1,14 @@
+[
+  {
+    "test_id": "EXT-01",
+    "category": "INJECTION",
+    "vulnerability_description": "SQL Injection in user search query",
+    "code_snippet": "def search_users(q): return db.execute(f'SELECT * FROM users WHERE name LIKE \"%{q}%\"')"
+  },
+  {
+    "test_id": "EXT-02",
+    "category": "NETWORK_ACCESS",
+    "vulnerability_description": "SSRF vulnerability accessing internal endpoint",
+    "code_snippet": "def get_avatar(url): return requests.get(url).content"
+  }
+]

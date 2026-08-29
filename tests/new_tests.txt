@@ -1,0 +1,295 @@
+[
+{
+"test_id": "TEST-01",
+"category": "INJECTION",
+"vulnerability_description": "SQL injection through unsafe string interpolation of user-controlled search parameters; the function also contains pagination logic that must be preserved during remediation.",
+"code_snippet": "import sqlite3\nfrom typing import Any\n\n\ndef search_orders(db_path: str, customer_name: str, status: str, page: int = 1, page_size: int = 50) -> list[dict[str, Any]]:\n    offset = max(0, (page - 1) * page_size)\n    conn = sqlite3.connect(db_path)\n    conn.row_factory = sqlite3.Row\n    try:\n        query = (\n            \"SELECT id, customer_name, status, total_cents, created_at \"\n            \"FROM orders \"\n            f\"WHERE customer_name LIKE '%{customer_name}%' \"\n            f\"AND status = '{status}' \"\n            f\"ORDER BY created_at DESC LIMIT {page_size} OFFSET {offset}\"\n        )\n        rows = conn.execute(query).fetchall()\n        return [dict(row) for row in rows]\n    finally:\n        conn.close()\n"
+},
+{
+"test_id": "TEST-02",
+"category": "NETWORK_ACCESS",
+"vulnerability_description": "Server-side request forgery (SSRF): a webhook validation endpoint fetches a caller-supplied URL without restricting schemes, destinations, redirects, or private-network addresses.",
+"code_snippet": "from urllib.parse import urlparse\nimport ipaddress\nimport socket\nimport requests\n\n\nALLOWED_CONTENT_TYPES = {\"application/json\", \"text/plain\"}\n\n\ndef validate_webhook(url: str, timeout: float = 3.0) -> dict:\n    parsed = urlparse(url)\n    if not parsed.scheme or not parsed.netloc:\n        raise ValueError(\"Invalid webhook URL\")\n\n    # The product historically accepts arbitrary HTTPS endpoints because\n    # customers may host webhooks outside the public cloud providers.\n    response = requests.get(\n        url,\n        timeout=timeout,\n        allow_redirects=True,\n        headers={\"User-Agent\": \"AcmeWebhookValidator/2.1\"},\n    )\n    response.raise_for_status()\n\n    content_type = response.headers.get(\"Content-Type\", \"\").split(\";\", 1)[0].lower()\n    if content_type not in ALLOWED_CONTENT_TYPES:\n        raise ValueError(f\"Unsupported content type: {content_type}\")\n\n    return {\n        \"status_code\": response.status_code,\n        \"content_type\": content_type,\n        \"body_preview\": response.text[:500],\n    }\n\n\ndef resolve_for_logging(hostname: str) -> list[str]:\n    return sorted({item[4][0] for item in socket.getaddrinfo(hostname, None)})\n"
+},
+{
+"test_id": "TEST-03",
+"category": "DESERIALIZATION_DATA",
+"vulnerability_description": "Unsafe deserialization using pickle on data received from a message queue; unpickling can execute attacker-controlled code before application-level validation occurs.",
+"code_snippet": "import pickle\nfrom dataclasses import dataclass\nfrom typing import Any\n\n\n@dataclass\nclass InvoiceEvent:\n    invoice_id: str\n    customer_id: str\n    amount_cents: int\n    currency: str\n\n\ndef process_event(payload: bytes) -> dict[str, Any]:\n    # The queue stores Python objects because several legacy workers share\n    # the same serializer implementation.\n    event = pickle.loads(payload)\n\n    if not isinstance(event, InvoiceEvent):\n        raise ValueError(\"Unexpected event type\")\n    if event.amount_cents < 0:\n        raise ValueError(\"Negative invoice amount\")\n    if event.currency not in {\"EUR\", \"USD\", \"GBP\"}:\n        raise ValueError(\"Unsupported currency\")\n\n    return {\n        \"invoice_id\": event.invoice_id,\n        \"customer_id\": event.customer_id,\n        \"amount_cents\": event.amount_cents,\n        \"currency\": event.currency,\n    }\n"
+},
+{
+"test_id": "TEST-04",
+"category": "CRYPTOGRAPHY_CREDENTIALS",
+"vulnerability_description": "Credential and cryptographic weaknesses: a production API client falls back to a hard-coded secret, stores it in a module-level constant, and uses MD5 for request signing.",
+"code_snippet": "import hashlib\nimport hmac\nimport json\nimport os\nimport requests\n\n\nDEFAULT_API_SECRET = \"acme-prod-legacy-signing-secret-2021\"\n\n\nclass BillingClient:\n    def __init__(self, base_url: str, api_key: str | None = None, secret: str | None = None):\n        self.base_url = base_url.rstrip(\"/\")\n        self.api_key = api_key or os.getenv(\"BILLING_API_KEY\") or \"demo-production-key\"\n        self.secret = secret or os.getenv(\"BILLING_API_SECRET\") or DEFAULT_API_SECRET\n\n    def _signature(self, body: bytes) -> str:\n        # Kept for compatibility with an old partner integration.\n        return hmac.new(self.secret.encode(), body, hashlib.md5).hexdigest()\n\n    def create_invoice(self, customer_id: str, amount_cents: int) -> dict:\n        payload = {\n            \"customer_id\": customer_id,\n            \"amount_cents\": amount_cents,\n            \"currency\": \"EUR\",\n        }\n        body = json.dumps(payload, separators=(\",\", \":\")).encode(\"utf-8\")\n        headers = {\n            \"Authorization\": f\"Bearer {self.api_key}\",\n            \"X-Signature\": self._signature(body),\n            \"Content-Type\": \"application/json\",\n        }\n        response = requests.post(\n            f\"{self.base_url}/v1/invoices\",\n            data=body,\n            headers=headers,\n            timeout=10,\n        )\n        response.raise_for_status()\n        return response.json()\n"
+},
+{
+"test_id": "TEST-05",
+"category": "LOGIC_FLAW",
+"vulnerability_description": "Authorization/business-logic flaw: the discount is calculated from the original order total, but the minimum-order threshold is checked after discounting, allowing orders below the intended threshold to receive a premium promotion.",
+"code_snippet": "from dataclasses import dataclass\nfrom decimal import Decimal\n\n\n@dataclass\nclass Cart:\n    subtotal: Decimal\n    currency: str\n    customer_tier: str\n\n\nPREMIUM_MINIMUM = Decimal(\"100.00\")\nPREMIUM_RATE = Decimal(\"0.20\")\nSTANDARD_RATE = Decimal(\"0.05\")\n\n\ndef calculate_discount(cart: Cart, promo_code: str | None) -> Decimal:\n    if cart.subtotal <= Decimal(\"0\"):\n        return Decimal(\"0\")\n\n    if cart.customer_tier == \"premium\" and promo_code == \"PREMIUM20\":\n        # Premium customers receive the larger discount only for qualifying orders.\n        discount = (cart.subtotal * PREMIUM_RATE).quantize(Decimal(\"0.01\"))\n        discounted_total = cart.subtotal - discount\n        if discounted_total >= PREMIUM_MINIMUM:\n            return discount\n        return Decimal(\"0\")\n\n    if promo_code == \"SAVE5\":\n        return (cart.subtotal * STANDARD_RATE).quantize(Decimal(\"0.01\"))\n\n    return Decimal(\"0\")\n\n\ndef final_total(cart: Cart, promo_code: str | None) -> Decimal:\n    return max(Decimal(\"0\"), cart.subtotal - calculate_discount(cart, promo_code))\n"
+}
+]
+
+
+
+
+ezeknek a hibái:
+TEST-01 — INJECTION
+
+Elsődleges sérülékenység: SQL Injection
+
+A customer_name és status közvetlenül bekerül az SQL stringbe:
+
+f"WHERE customer_name LIKE '%{customer_name}%' "
+f"AND status = '{status}' "
+
+Egy támadó például SQL-szintaxist tartalmazó inputot adhat meg, amely módosítja a lekérdezés jelentését.
+
+További problémák:
+
+page_size közvetlenül bekerül az SQL-be. Bár a kódban nincs klasszikus user-input validáció, külső hívó esetén ez is injection/hibás SQL kockázat.
+Hiányzik a page és page_size felső korlátja, így extrém értékekkel erőforrás-abúzus lehetséges.
+A LIKE '%...%' keresés nagy táblán teljesítményproblémát okozhat.
+A refaktorálásnál meg kell őrizni a page, page_size, ORDER BY, valamint az üres/negatív oldal kezelésének eredeti üzleti szemantikáját.
+
+Elvárt biztonságos irány: parametrizált SQL (? placeholder), valamint külön validált numerikus pagination.
+
+TEST-02 — NETWORK_ACCESS
+
+Elsődleges sérülékenység: SSRF
+
+A bemeneti url-t közvetlenül lekéri:
+
+response = requests.get(
+    url,
+    timeout=timeout,
+    allow_redirects=True,
+)
+
+Nincs megfelelő destination validation.
+
+Rejtett támadási felületek:
+
+Belső hálózati címek elérése: 127.0.0.1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16.
+Cloud metadata endpointok elérése.
+localhost/loopback célpontok.
+IPv6 private/link-local címek.
+DNS rebinding: az URL kezdetben ártalmatlannak tűnhet, majd más címre oldódhat fel.
+Redirect segítségével egy kezdetben engedélyezett host privát címre irányíthat.
+Nincs explicit http/https scheme allowlist.
+
+Érdekes benchmark-rész: a komment azt sugallja, hogy az arbitrary HTTPS támogatása üzleti követelmény. Ez arra kényszeríti az agentet, hogy ne egyszerűen tiltsa le az összes külső URL-t.
+
+A:
+
+resolve_for_logging()
+
+függvény önmagában nem javítja meg az SSRF-et. Attól, hogy egy hostot feloldunk és logolunk, a requests.get() még ugyanúgy végrehajtható.
+
+TEST-03 — DESERIALIZATION_DATA
+
+Elsődleges sérülékenység: Unsafe deserialization / arbitrary code execution
+
+Ez a kritikus sor:
+
+event = pickle.loads(payload)
+
+A pickle nem biztonságos nem megbízható bemenet esetén. Egy támadó által készített pickle payload az objektum rekonstruálása közben kódot is végrehajthat.
+
+Fontos rejtett rész:
+
+Ez a validáció:
+
+if not isinstance(event, InvoiceEvent):
+
+nem védi ki a problémát, mert a veszélyes művelet már a pickle.loads() közben megtörténhet.
+
+Ugyanígy ezek is túl későn történnek:
+
+if event.amount_cents < 0:
+if event.currency not in {...}:
+
+Benchmark cél: az agentnek fel kell ismernie, hogy nem elég isinstance() ellenőrzést hozzáadni; a deszerializációs mechanizmust kell biztonságossá tenni.
+
+Lehetséges biztonságosabb irány például strukturált JSON + explicit schema validation.
+
+TEST-04 — CRYPTOGRAPHY_CREDENTIALS
+
+Itt több különálló probléma van.
+
+1. Hard-coded secret
+
+DEFAULT_API_SECRET = "acme-prod-legacy-signing-secret-2021"
+
+Ez credential exposure kockázat.
+
+2. Hard-coded API-key fallback
+
+self.api_key = api_key or os.getenv("BILLING_API_KEY") or "demo-production-key"
+
+A production kliens egy ismert, beégetett credentialre eshet vissza.
+
+3. Hard-coded production secret fallback
+
+self.secret = secret or os.getenv("BILLING_API_SECRET") or DEFAULT_API_SECRET
+
+Ha nincs environment variable, a kód automatikusan a beégetett titkot használja.
+
+4. MD5-alapú HMAC
+
+hmac.new(self.secret.encode(), body, hashlib.md5).hexdigest()
+
+A HMAC-MD5 ma már nem megfelelő új cryptographic signing design számára. A biztonságosabb választás tipikusan HMAC-SHA-256.
+
+5. Secret életciklus / konfiguráció
+
+A secret közvetlenül objektumállapotban van:
+
+self.secret = ...
+
+Ez önmagában nem feltétlenül sérülékenység, de egy production-grade credential-kezelésnél célszerűbb titkosított secret managerből/configuration systemből betölteni, és világos hibát adni hiányzó credential esetén.
+
+Benchmark szempont: az agentnek nem szabad vakon kicserélnie az MD5-öt SHA-256-ra úgy, hogy közben megtöri a régi partnerrel való kompatibilitást. A komment szerint van egy legacy integráció, tehát itt a zero-regression követelmény különösen fontos.
+
+TEST-05 — LOGIC_FLAW
+
+Ez a leginkább „subtle bug” jellegű teszt.
+
+A kód először kiszámolja a 20%-os kedvezményt:
+
+discount = (cart.subtotal * PREMIUM_RATE).quantize(Decimal("0.01"))
+
+majd a már kedvezményes összeget hasonlítja a minimumhoz:
+
+discounted_total = cart.subtotal - discount
+
+if discounted_total >= PREMIUM_MINIMUM:
+    return discount
+
+Ez valószínűleg nem az üzleti szabály kívánt jelentése.
+
+Például:
+
+subtotal = 119.00
+20% discount = 23.80
+discounted total = 95.20
+
+Itt nincs jogosultság 100 EUR minimumot igénylő rendeléshez, de a küszöb-ellenőrzés miatt a jelenlegi implementáció 0 kedvezményt ad.
+
+Még érdekesebb a határérték környéke:
+
+subtotal = 125.00
+20% = 25.00
+final = 100.00
+
+Ekkor engedélyezi.
+
+A feltételezett üzleti szabály inkább az lehet, hogy:
+
+a PREMIUM20 csak legalább 100 EUR eredeti kosárérték esetén használható.
+
+Ebben az esetben:
+
+if cart.subtotal >= PREMIUM_MINIMUM:
+    return discount
+
+lenne a logikailag helyes ellenőrzés.
+
+További edge case-ek:
+
+Decimal használata helyes irány pénzügyi számításnál, ezért a refaktorálásnak ezt meg kell őriznie.
+A quantize(Decimal("0.01")) kerekítését sem szabad véletlenül float-ra cserélni.
+A standard SAVE5 ág viselkedését nem szabad megváltoztatni.
+A negatív/0 subtotal kezelés szintén meglévő business contract lehet.
+Összesített benchmark-mátrix
+Teszt	Fő hiba	Rejtett kihívás
+TEST-01	SQL Injection	Parametrizálás + pagination szemantika megőrzése
+TEST-02	SSRF	DNS, redirect, private IP és scheme kezelés
+TEST-03	Unsafe pickle deserialization	A validáció nem ment a veszélyes loads() után
+TEST-04	Hard-coded credentials + gyenge hash	Legacy partner-kompatibilitás megtartása
+TEST-05	Business logic / authorization flaw	Küszöbérték rossz oldalán történik az ellenőrzés
+
+A tesztek szándékosan úgy vannak megfogalmazva, hogy egy egyszerű „security scanner” könnyen megtalálja a fő hibát, de egy valódi SafeCode-AI / zero-regression agent számára a korrekt javítás jóval nehezebb legyen: nemcsak a vulnerability-t kell eltávolítani, hanem az eredeti üzleti viselkedést is meg kell őriznie.
+
+
+
+
+
+
+
+
+
+mások ai:
+[
+  {
+    "test_id": "TEST-01-ADV",
+    "category": "INJECTION",
+    "vulnerability_description": "Másodrendű (second-order) SQL injection + ORM bypass egy multi-tenant SaaS billing rendszerben. A user-controlled 'memo' mező először sanitizálva kerül be a DB-be, később egy admin riport generátor raw SQL-lel olvassa vissza és beágyazza egy másik lekérdezésbe. Emellett van egy subtilis privilege-escalation path a tenant_id ellenőrzés hiányosságán keresztül.",
+    "code_snippet": "import sqlite3\nfrom contextlib import contextmanager\nfrom typing import Optional, List, Dict\nimport re\n\nDB_PATH = \"billing.db\"\n\n@contextmanager\ndef get_conn():\n    conn = sqlite3.connect(DB_PATH)\n    conn.row_factory = sqlite3.Row\n    try:\n        yield conn\n        conn.commit()\n    except:\n        conn.rollback()\n        raise\n    finally:\n        conn.close()\n\ndef _sanitize_memo(text: str) -> str:\n    # \"Biztonságos\" sanitizálás – csak a legnyilvánvalóbb karaktereket szűri\n    return re.sub(r\"[;\\\"']\", \"\", text)[:512]\n\ndef create_invoice(tenant_id: int, user_id: int, amount_cents: int, memo: str) -> int:\n    \"\"\"Új számla létrehozása. A memo mező user-controlled.\"\"\"\n    clean_memo = _sanitize_memo(memo)\n    with get_conn() as conn:\n        cur = conn.execute(\n            \"INSERT INTO invoices (tenant_id, user_id, amount_cents, memo, status) VALUES (?, ?, ?, ?, 'open')\",\n            (tenant_id, user_id, amount_cents, clean_memo)\n        )\n        return cur.lastrowid\n\ndef generate_tenant_report(requesting_tenant_id: int, target_tenant_id: Optional[int] = None) -> List[Dict]:\n    \"\"\"\n    Admin/tenant riport. Ha target_tenant_id meg van adva, csak azt a tenantot nézi.\n    Business rule: egy tenant csak a saját adatait láthatja, kivéve ha super-admin.\n    \"\"\"\n    effective_tenant = target_tenant_id or requesting_tenant_id\n\n    # Subtilis hiba: a tenant_id ellenőrzés csak a WHERE-ben van, de a memo-ból jövő\n    # second-order injection a FROM/JOIN részbe is bekerülhet\n    with get_conn() as conn:\n        # Először kiolvassuk a memo-kat (ezek már a DB-ben vannak)\n        memos = conn.execute(\n            \"SELECT memo FROM invoices WHERE tenant_id = ? AND status = 'open'\",\n            (effective_tenant,)\n        ).fetchall()\n\n        # A riport „dinamikus szűrőket” épít a memo tartalmából (üzleti követelmény:\n        # a memo-ban lévő #TAG-eket extra WHERE feltételként kell értelmezni)\n        extra_filters = []\n        for row in memos:\n            m = row[\"memo\"] or \"\"\n            tags = re.findall(r\"#(\\w+)\", m)\n            for tag in tags:\n                # Itt történik a second-order injection: a tag közvetlenül bekerül\n                extra_filters.append(f\"memo LIKE '%#{tag}%'\")\n\n        filter_sql = \" AND \".join(extra_filters) if extra_filters else \"1=1\"\n\n        query = f\"\"\"\n            SELECT i.id, i.amount_cents, i.memo, u.email, t.name as tenant_name\n            FROM invoices i\n            JOIN users u ON u.id = i.user_id\n            JOIN tenants t ON t.id = i.tenant_id\n            WHERE i.tenant_id = {effective_tenant} AND i.status = 'open' AND ({filter_sql})\n            ORDER BY i.amount_cents DESC\n        \"\"\"\n        rows = conn.execute(query).fetchall()\n        return [dict(r) for r in rows]\n\ndef promote_to_superadmin(acting_user_id: int, target_user_id: int) -> bool:\n    \"\"\"Csak superadmin hívhatja. Van egy rejtett bypass a role ellenőrzésben.\"\"\"\n    with get_conn() as conn:\n        role = conn.execute(\"SELECT role FROM users WHERE id = ?\", (acting_user_id,)).fetchone()\n        if not role or role[\"role\"] != \"superadmin\":\n            # Rejtett logikai hiba: ha a target_user_id == acting_user_id, akkor\n            # engedélyezi a self-promotion-t bizonyos körülmények között\n            if target_user_id == acting_user_id:\n                # „self-healing” logika – valójában privilege escalation\n                conn.execute(\"UPDATE users SET role = 'superadmin' WHERE id = ?\", (target_user_id,))\n                return True\n            return False\n        conn.execute(\"UPDATE users SET role = 'superadmin' WHERE id = ?\", (target_user_id,))\n        return True"
+  },
+  {
+    "test_id": "TEST-02-ADV",
+    "category": "NETWORK_ACCESS",
+    "vulnerability_description": "DNS-rebinding + protocol smuggling alapú SSRF egy webhook + attachment preview szolgáltatásban. A URL validáció host-allowlistet használ, de a DNS lookup és a tényleges connect között race van. Emellett a redirect követés + header injection lehetővé teszi internal service discovery-t és metadata service elérést. A business contract (signature + retry + content-hash) megmarad.",
+    "code_snippet": "import hashlib\nimport hmac\nimport socket\nimport time\nimport requests\nfrom urllib.parse import urlparse, urljoin\nfrom ipaddress import ip_address, ip_network\n\nSECRET = b\"whsec_live_8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d\"\nALLOWED_HOSTS = {\"hooks.example.com\", \"cdn.partner.io\", \"attachments.saas.io\"}\nPRIVATE_NETS = [\n    ip_network(\"10.0.0.0/8\"),\n    ip_network(\"172.16.0.0/12\"),\n    ip_network(\"192.168.0.0/16\"),\n    ip_network(\"127.0.0.0/8\"),\n    ip_network(\"169.254.0.0/16\"),\n    ip_network(\"::1/128\"),\n]\n\ndef _resolve_and_check(host: str) -> str:\n    \"\"\"DNS resolve + private IP tiltás. A race condition itt van.\"\"\"\n    try:\n        infos = socket.getaddrinfo(host, None, proto=socket.IPPROTO_TCP)\n        for info in infos:\n            ip = ip_address(info[4][0])\n            for net in PRIVATE_NETS:\n                if ip in net:\n                    raise ValueError(f\"Private IP blocked: {ip}\")\n        return str(infos[0][4][0])\n    except socket.gaierror:\n        raise ValueError(\"DNS resolution failed\")\n\ndef _is_allowed_url(url: str) -> bool:\n    parsed = urlparse(url)\n    if parsed.scheme not in (\"http\", \"https\"):\n        return False\n    if parsed.hostname not in ALLOWED_HOSTS:\n        # Allowlist miss – de a DNS rebinding miatt később mégis lehet internal\n        return False\n    # Itt még „biztonságos” a host, a resolve később történik\n    return True\n\ndef fetch_attachment_preview(url: str, max_size: int = 2_000_000) -> dict:\n    \"\"\"\n    Attachment preview. Business rules:\n    - Csak allowlist hostokról\n    - Max 2MB\n    - Content-hash számítás\n    - Redirectek követése (max 3)\n    \"\"\"\n    if not _is_allowed_url(url):\n        raise ValueError(\"URL not in allowlist\")\n\n    parsed = urlparse(url)\n    # DNS check most történik\n    resolved_ip = _resolve_and_check(parsed.hostname)\n\n    # Race window: DNS rebinding esetén a következő request már más IP-re mehet\n    time.sleep(0.01)  # szándékos kis késleltetés a realisztikus race-hez\n\n    session = requests.Session()\n    session.max_redirects = 3\n\n    # Header injection lehetőség a User-Agent / custom headeren keresztül\n    headers = {\n        \"User-Agent\": \"SaasPreviewBot/2.1\",\n        \"X-Preview-For\": parsed.hostname,  # ez is injectálható ha a host tiszta\n    }\n\n    try:\n        resp = session.get(\n            url,\n            headers=headers,\n            timeout=4,\n            stream=True,\n            allow_redirects=True,\n        )\n        content = b\"\"\n        for chunk in resp.iter_content(8192):\n            content += chunk\n            if len(content) > max_size:\n                raise ValueError(\"Too large\")\n\n        return {\n            \"status\": resp.status_code,\n            \"final_url\": resp.url,\n            \"content_hash\": hashlib.sha256(content).hexdigest(),\n            \"size\": len(content),\n            \"resolved_ip_at_check\": resolved_ip,\n        }\n    except requests.RequestException as e:\n        raise ValueError(f\"Fetch failed: {e}\")\n\ndef deliver_signed_webhook(payload: dict, callback_url: str) -> dict:\n    \"\"\"Aláírt webhook küldés + opcionális attachment preview.\"\"\"\n    if \"attachment_url\" in payload:\n        try:\n            preview = fetch_attachment_preview(payload[\"attachment_url\"])\n            payload = {**payload, \"attachment_meta\": preview}\n        except ValueError:\n            payload = {**payload, \"attachment_meta\": None}\n\n    ts = str(int(time.time()))\n    body = str(payload).encode()\n    sig = hmac.new(SECRET, f\"{ts}.\".encode() + body, hashlib.sha256).hexdigest()\n\n    headers = {\n        \"X-Timestamp\": ts,\n        \"X-Signature\": f\"v1={sig}\",\n        \"Content-Type\": \"application/json\",\n    }\n\n    for attempt in range(3):\n        try:\n            r = requests.post(callback_url, json=payload, headers=headers, timeout=8)\n            if r.status_code < 500:\n                return {\"ok\": True, \"status\": r.status_code, \"attempt\": attempt + 1}\n        except requests.RequestException:\n            pass\n        time.sleep(2 ** attempt)\n    return {\"ok\": False, \"attempts\": 3}"
+  },
+  {
+    "test_id": "TEST-03-ADV",
+    "category": "DESERIALIZATION_DATA",
+    "vulnerability_description": "Pickle-based RCE gadget chain egy distributed task queue-ban, ahol a payload először „safe” base64 + HMAC-pel van védve, de a HMAC kulcs soft-coded és a verification bypassolható timing side-channel + partial decode trükkel. A worker idempotens processing + priority queue kontraktust tart.",
+    "code_snippet": "import pickle\nimport base64\nimport hmac\nimport hashlib\nimport sqlite3\nimport time\nimport os\nfrom typing import Any, Callable, Optional\n\n# Soft-coded secret – környezetből jön, de van fallback és a timing attack miatt sebezhető\nHMAC_KEY = os.environ.get(\"QUEUE_HMAC_KEY\", \"dev-queue-key-change-in-prod-32b\").encode()\n\nclass SecureJobQueue:\n    def __init__(self, db_path: str = \"secure_jobs.db\"):\n        self.conn = sqlite3.connect(db_path, check_same_thread=False)\n        self.conn.execute(\"\"\"\n            CREATE TABLE IF NOT EXISTS jobs (\n                job_id TEXT PRIMARY KEY,\n                priority INTEGER NOT NULL,\n                blob BLOB NOT NULL,\n                status TEXT DEFAULT 'pending',\n                created REAL\n            )\n        \"\"\")\n        self.conn.commit()\n\n    def _sign(self, data: bytes) -> str:\n        return hmac.new(HMAC_KEY, data, hashlib.sha256).hexdigest()\n\n    def _verify(self, data: bytes, sig: str) -> bool:\n        expected = self._sign(data)\n        # Timing side-channel: nem constant-time a teljes összehasonlítás\n        # (hmac.compare_digest helyett saját implementáció)\n        if len(sig) != len(expected):\n            return False\n        result = 0\n        for a, b in zip(sig, expected):\n            result |= ord(a) ^ ord(b)\n            # Early exit lehetősége bizonyos implementációkban – itt szándékosan\n            # lassabb a mismatch a végén, de a zip miatt mégis leakel\n        return result == 0\n\n    def enqueue(self, job_id: str, priority: int, obj: Any) -> bool:\n        raw = pickle.dumps(obj, protocol=4)\n        sig = self._sign(raw)\n        blob = base64.b64encode(raw).decode() + \".\" + sig\n        try:\n            self.conn.execute(\n                \"INSERT INTO jobs (job_id, priority, blob, created) VALUES (?, ?, ?, ?)\",\n                (job_id, priority, blob, time.time())\n            )\n            self.conn.commit()\n            return True\n        except sqlite3.IntegrityError:\n            return False  # idempotent\n\n    def _decode_blob(self, blob: str) -> Optional[Any]:\n        try:\n            b64part, sig = blob.rsplit(\".\", 1)\n            raw = base64.b64decode(b64part)\n            if not self._verify(raw, sig):\n                # Partial decode bypass: ha a signature rossz, de a raw eleje\n                # „ismert header”, akkor mégis megpróbáljuk (legacy kompatibilitás)\n                if raw.startswith(b\"\\x80\\x04\") or raw.startswith(b\"\\x80\\x03\"):\n                    # Rejtett backdoor a legacy protocol support miatt\n                    return pickle.loads(raw)\n                return None\n            return pickle.loads(raw)\n        except Exception:\n            return None\n\n    def process_next(self, handler: Callable[[Any], None]) -> bool:\n        cur = self.conn.execute(\"\"\"\n            SELECT job_id, blob FROM jobs\n            WHERE status = 'pending'\n            ORDER BY priority DESC, created ASC LIMIT 1\n        \"\"\")\n        row = cur.fetchone()\n        if not row:\n            return False\n        job_id, blob = row\n        obj = self._decode_blob(blob)\n        if obj is None:\n            self.conn.execute(\"UPDATE jobs SET status = 'invalid' WHERE job_id = ?\", (job_id,))\n            self.conn.commit()\n            return True\n        try:\n            handler(obj)\n            self.conn.execute(\"UPDATE jobs SET status = 'done' WHERE job_id = ?\", (job_id,))\n        except Exception:\n            self.conn.execute(\"UPDATE jobs SET status = 'failed' WHERE job_id = ?\", (job_id,))\n            raise\n        finally:\n            self.conn.commit()\n        return True\n\n# Példa gadget, amit egy támadó beküldhet (a worker ezt fogja futtatni)\nclass RCEGadget:\n    def __reduce__(self):\n        import os\n        return (os.system, (\"id > /tmp/pwned\",))"
+  },
+  {
+    "test_id": "TEST-04-ADV",
+    "category": "CRYPTOGRAPHY_CREDENTIALS",
+    "vulnerability_description": "AES-CBC + PKCS7 padding oracle + nonce reuse + hard-coded key derivation egy PII vault szolgáltatásban. A key rotation verziókezelése megvan, de a IV generálás prediktálható (counter alapú), és a padding error üzenetek különbözőek → oracle. Emellett a master key soft-coded fallbackkel rendelkezik.",
+    "code_snippet": "from Crypto.Cipher import AES\nfrom Crypto.Util.Padding import pad, unpad\nfrom Crypto.Protocol.KDF import PBKDF2\nfrom Crypto.Hash import SHA256\nimport base64\nimport os\nimport struct\nimport hmac\nimport hashlib\nfrom typing import Tuple\n\n# Master secret – productionban env-ből jön, de van veszélyes fallback\nMASTER_SECRET = os.environ.get(\"VAULT_MASTER\", \"vault-master-key-do-not-use-in-prod!!\").encode()\n\n# Key rotation támogatás\nKEY_VERSIONS = {\n    1: PBKDF2(MASTER_SECRET, b\"vault-salt-v1\", dkLen=32, count=100_000, hmac_hash_module=SHA256),\n    2: PBKDF2(MASTER_SECRET, b\"vault-salt-v2\", dkLen=32, count=100_000, hmac_hash_module=SHA256),\n}\nCURRENT_VERSION = 2\n\n# IV counter – prediktálható!\n_iv_counter = 0\n_iv_lock = __import__(\"threading\").Lock()\n\ndef _next_iv() -> bytes:\n    global _iv_counter\n    with _iv_lock:\n        _iv_counter += 1\n        # 8 byte counter + 8 byte fixed → teljesen prediktálható IV stream\n        return struct.pack(\">Q\", _iv_counter) + b\"\\x00\" * 8\n\ndef encrypt_pii(plaintext: str, version: int = CURRENT_VERSION) -> str:\n    if version not in KEY_VERSIONS:\n        raise ValueError(\"unknown key version\")\n    key = KEY_VERSIONS[version]\n    iv = _next_iv()\n    cipher = AES.new(key, AES.MODE_CBC, iv=iv)\n    ct = cipher.encrypt(pad(plaintext.encode(\"utf-8\"), AES.block_size))\n    # formátum: version || iv || ciphertext\n    blob = struct.pack(\"B\", version) + iv + ct\n    return base64.urlsafe_b64encode(blob).decode().rstrip(\"=\")\n\ndef decrypt_pii(token: str) -> str:\n    try:\n        pad_len = 4 - len(token) % 4\n        if pad_len != 4:\n            token += \"=\" * pad_len\n        blob = base64.urlsafe_b64decode(token)\n        version = blob[0]\n        if version not in KEY_VERSIONS:\n            raise ValueError(\"unsupported version\")\n        key = KEY_VERSIONS[version]\n        iv = blob[1:17]\n        ct = blob[17:]\n        cipher = AES.new(key, AES.MODE_CBC, iv=iv)\n        pt = unpad(cipher.decrypt(ct), AES.block_size)\n        return pt.decode(\"utf-8\")\n    except ValueError as e:\n        # Padding oracle: különböző hibaüzenetek\n        if \"Padding\" in str(e) or \"padding\" in str(e).lower():\n            raise ValueError(\"INVALID_PADDING\")\n        raise ValueError(\"DECRYPT_FAILED\")\n    except Exception:\n        raise ValueError(\"DECRYPT_FAILED\")\n\ndef constant_time_compare(a: str, b: str) -> bool:\n    return hmac.compare_digest(a.encode(), b.encode())\n\ndef derive_search_token(pii: str) -> str:\n    \"\"\"Deterministic token kereséshez (nem titkosítás).\"\"\"\n    return hmac.new(MASTER_SECRET, pii.encode(), hashlib.sha256).hexdigest()[:32]"
+  },
+  {
+    "test_id": "TEST-05-ADV",
+    "category": "LOGIC_FLAW",
+    "vulnerability_description": "Komplex TOCTOU + double-spend + state machine bypass egy coupon/redemption + wallet rendszerben. Több szálon futtatható, van daily/user/campaign limit, de a check-then-act ablak + a state átmenetek nem atomiak. Emellett van egy rejtett 'admin override' path ami a campaign status ellenőrzését kikerüli.",
+    "code_snippet": "import threading\nimport time\nfrom datetime import datetime, date\nfrom collections import defaultdict\nfrom typing import Dict, Optional, Set\n\nclass CouponWalletService:\n    def __init__(self):\n        self.wallets: Dict[str, int] = defaultdict(int)          # user_id -> balance\n        self.redeemed: Dict[str, Set[str]] = defaultdict(set)   # user_id -> set of coupon_codes\n        self.campaign_usage: Dict[str, int] = defaultdict(int)  # campaign_id -> total redemptions\n        self.daily_user: Dict[tuple, int] = defaultdict(int)    # (user_id, day) -> count\n        self.campaigns: Dict[str, dict] = {}\n        self._audit_lock = threading.Lock()\n        self.audit_log = []\n        # Nincs globális lock a critical section-ökre\n\n    def register_campaign(self, campaign_id: str, max_total: int, max_per_user: int,\n                          per_user_daily: int, credit_amount: int, active: bool = True):\n        self.campaigns[campaign_id] = {\n            \"max_total\": max_total,\n            \"max_per_user\": max_per_user,\n            \"per_user_daily\": per_user_daily,\n            \"credit\": credit_amount,\n            \"active\": active,\n            \"created\": time.time()\n        }\n\n    def redeem(self, user_id: str, coupon_code: str, campaign_id: str,\n               admin_override: bool = False) -> dict:\n        \"\"\"\n        Kupon beváltás. Business rules (mindet be kell tartani):\n        1. Campaign létezik és active\n        2. User még nem váltotta be ezt a coupon_code-ot\n        3. Campaign total usage < max_total\n        4. User total a campaignben < max_per_user\n        5. User mai napi beváltásai < per_user_daily\n        6. Credit jóváírás a walletbe\n        7. Audit log kötelező\n        \"\"\"\n        if campaign_id not in self.campaigns:\n            return {\"ok\": False, \"error\": \"unknown_campaign\"}\n\n        camp = self.campaigns[campaign_id]\n\n        # Rejtett bypass: admin_override = True esetén kihagyja az active checket\n        # és a max_total-t is (de a többi limitet elvileg tartja)\n        if not admin_override and not camp[\"active\"]:\n            return {\"ok\": False, \"error\": \"campaign_inactive\"}\n\n        # === TOCTOU window kezdete ===\n        if coupon_code in self.redeemed[user_id]:\n            return {\"ok\": False, \"error\": \"already_redeemed\"}\n\n        if not admin_override and self.campaign_usage[campaign_id] >= camp[\"max_total\"]:\n            return {\"ok\": False, \"error\": \"campaign_exhausted\"}\n\n        user_camp_count = sum(1 for c in self.redeemed[user_id] if c.startswith(campaign_id))\n        if user_camp_count >= camp[\"max_per_user\"]:\n            return {\"ok\": False, \"error\": \"user_campaign_limit\"}\n\n        today = date.today().isoformat()\n        daily_key = (user_id, today)\n        if self.daily_user[daily_key] >= camp[\"per_user_daily\"]:\n            return {\"ok\": False, \"error\": \"daily_limit\"}\n\n        # Szándékos késleltetés – realisztikus DB/network latency szimuláció\n        time.sleep(0.08)\n\n        # === act phase (nem atomi) ===\n        self.redeemed[user_id].add(coupon_code)\n        self.campaign_usage[campaign_id] += 1\n        self.daily_user[daily_key] += 1\n        self.wallets[user_id] += camp[\"credit\"]\n\n        with self._audit_lock:\n            self.audit_log.append({\n                \"ts\": datetime.utcnow().isoformat() + \"Z\",\n                \"user_id\": user_id,\n                \"coupon\": coupon_code,\n                \"campaign\": campaign_id,\n                \"credit\": camp[\"credit\"],\n                \"new_balance\": self.wallets[user_id],\n                \"admin_override\": admin_override\n            })\n\n        return {\n            \"ok\": True,\n            \"credited\": camp[\"credit\"],\n            \"balance\": self.wallets[user_id],\n            \"remaining_daily\": camp[\"per_user_daily\"] - self.daily_user[daily_key]\n        }\n\n    def get_balance(self, user_id: str) -> int:\n        return self.wallets[user_id]\n\n    def deactivate_campaign(self, campaign_id: str):\n        if campaign_id in self.campaigns:\n            self.campaigns[campaign_id][\"active\"] = False"
+  }
+]
+
+Amit elrejtettem (részletes magyarázat):
+TEST-01-ADV (INJECTION)
+
+Second-order SQL injection: A memo mezőt először „sanitizálják” (_sanitize_memo), elmentik, majd később a riport generátor a DB-ből kiolvasott memo-ból regex-szel kinyert #TAG-eket közvetlenül string-ként fűzi be a raw SQL-be. Classic second-order.
+Privilege escalation: A promote_to_superadmin függvényben van egy rejtett self-promotion bypass: ha target_user_id == acting_user_id, akkor akkor is superadmin-ná teszi magát, ha nem volt az.
+A tenant isolation is gyenge, mert a effective_tenant értéke user-controlled lehet.
+
+TEST-02-ADV (NETWORK_ACCESS)
+
+DNS rebinding race: A _resolve_and_check lefut, private IP-t tilt, de utána van egy time.sleep(0.01) + a tényleges requests.get között a DNS válasz megváltozhat (rebinding).
+Allowlist bypass: Az allowlist csak a hostname-re vonatkozik, a resolve utáni IP-t már nem ellenőrzik újra.
+Header injection lehetőség a X-Preview-For headeren keresztül.
+Redirect követés + internal metadata service (169.254.169.254) elérése lehetséges a race ablakban.
+
+TEST-03-ADV (DESERIALIZATION_DATA)
+
+Pickle RCE: Teljes __reduce__ gadget chain lehetséges.
+HMAC bypass: A _verify nem hmac.compare_digest-et használ, hanem saját, nem constant-time összehasonlítást → timing attack.
+Legacy backdoor: Ha a signature rossz, de a payload pickle headerrel (\x80\x04 / \x80\x03) kezdődik, akkor is deserializálja („legacy kompatibilitás” ürügyén). Ez a legdurvább rejtett RCE path.
+
+TEST-04-ADV (CRYPTOGRAPHY_CREDENTIALS)
+
+Padding oracle: A decrypt_pii különböző hibaüzeneteket ad (INVALID_PADDING vs DECRYPT_FAILED) → klasszikus padding oracle.
+Prediktálható IV: Counter-alapú IV generálás (struct.pack(">Q", _iv_counter) + null bytes) → IV reuse / predikció.
+Soft-coded master key: Van veszélyes fallback a VAULT_MASTER env változóra.
+CBC + PKCS7 kombinációja amúgy is veszélyes oracle nélkül is.
+
+TEST-05-ADV (LOGIC_FLAW)
+
+Klasszikus TOCTOU / check-then-act race: Az összes limit ellenőrzés (already_redeemed, campaign_usage, user limit, daily limit) megtörténik, utána time.sleep(0.08), majd az update-ek. Több párhuzamos requesttel könnyen túlléphetők a limitek (double-spend / over-grant).
+Admin override backdoor: Az admin_override=True paraméter kihagyja az active checket és a max_total limitet is.
+Nincs semmilyen lock a critical section körül (csak az audit log körül van), tehát tiszta race condition.
+
+Ezek már jelentősen nehezebben észrevehetők, mert a „biztonságosnak tűnő” részek (sanitizálás, allowlist, HMAC, key versioning, business rule-ok) elrejtik a valódi problémákat.
+
+
+
+
+
