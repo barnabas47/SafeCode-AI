@@ -207,18 +207,17 @@ def index():
                     </button>
                 </div>
 
-                <!-- Right: Execution & Results Panel -->
                 <div class="glass-card rounded-3xl p-6 space-y-4 shadow-2xl shadow-black/50">
                     <div class="flex items-center justify-between">
                         <span class="text-sm font-bold text-slate-200 flex items-center gap-2">
                             <i class="fa-solid fa-microchip text-indigo-400"></i> Verification Timeline & Report
                         </span>
                         <div class="flex items-center gap-2">
-                            <a id="btnDownloadReport" target="_blank" class="hidden text-xs font-extrabold px-3 py-1.5 rounded-xl bg-sky-900/60 hover:bg-sky-800 text-sky-200 transition flex items-center gap-1.5 shadow-md">
-                                <i class="fa-solid fa-file-pdf"></i> Download PDF Report
+                            <a id="btnDownloadReport" target="_blank" class="hidden text-xs font-extrabold px-3.5 py-2 rounded-xl bg-gradient-to-r from-rose-600 via-red-600 to-rose-700 hover:from-rose-500 hover:to-red-500 text-white transition-all duration-200 flex items-center gap-2 shadow-lg shadow-rose-950/60 cursor-pointer">
+                                <i class="fa-solid fa-file-pdf text-sm text-rose-100"></i> Download PDF Report
                             </a>
-                            <span id="badgeStatus" class="hidden text-xs font-extrabold px-3.5 py-1 rounded-full bg-emerald-950/80 text-emerald-300 shadow-md">
-                                ZERO REGRESSION PASSED
+                            <span id="badgeStatus" class="hidden text-xs font-extrabold px-3.5 py-1.5 rounded-full bg-emerald-950/90 text-emerald-300 shadow-md">
+                                <i class="fa-solid fa-circle-check me-1"></i> ZERO REGRESSION PASSED
                             </span>
                         </div>
                     </div>
@@ -368,11 +367,14 @@ def index():
                     }})
                 }});
                 const data = await response.json();
-                badge.classList.remove("hidden");
 
-                if(data.executive_report && data.executive_report.filename) {{
+                if(response.ok && data.status === "SUCCESS" && data.executive_report && data.executive_report.filename) {{
                     btnPdf.href = `/api/report/download/${{data.executive_report.filename}}`;
                     btnPdf.classList.remove("hidden");
+                    badge.classList.remove("hidden");
+                }} else {{
+                    btnPdf.classList.add("hidden");
+                    badge.classList.add("hidden");
                 }}
 
                 const catInfo = data.taxonomy_classification || {{}};
@@ -419,6 +421,8 @@ def index():
                 }}
             }} catch(err) {{
                 console.error("SafeCode Patch Execution Error:", err);
+                btnPdf.classList.add("hidden");
+                badge.classList.add("hidden");
                 resDiv.innerHTML = `<div class="p-4 rounded-2xl bg-rose-950/80 text-rose-300 text-sm font-semibold shadow-lg">
                     <i class="fa-solid fa-triangle-exclamation me-2"></i>Error Executing Audit: ${{escapeHtml(err.message || String(err))}}
                 </div>`;
