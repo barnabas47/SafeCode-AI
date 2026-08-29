@@ -27,7 +27,13 @@ class GitIntegrationEngine:
         script_content = """#!/bin/sh
 # SafeCode-AI Pre-Commit Guardrail Hook
 echo "🛡️ SafeCode-AI: Running pre-commit vulnerability scan..."
-python -m pytest tests/ -k "test_security or test_agents" --quiet
+PYTHON_BIN="python"
+if command -v py >/dev/null 2>&1; then
+    PYTHON_BIN="py"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+fi
+$PYTHON_BIN -m pytest tests/ -k "test_security or test_agents" --quiet
 if [ $? -ne 0 ]; then
     echo "❌ SafeCode-AI: Security scan failed! Commit aborted."
     exit 1

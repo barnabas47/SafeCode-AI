@@ -120,7 +120,7 @@ def index():
                 <button onclick="openKnowledgeModal()" class="text-xs font-bold bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 px-3.5 py-2 rounded-xl shadow-md transition flex items-center gap-2">
                     <i class="fa-solid fa-brain text-sky-400"></i> Learn Custom Rule
                 </button>
-                <button onclick="installGitIntegration()" class="text-xs font-bold bg-slate-900/80 hover:bg-slate-800 text-slate-200 px-3.5 py-2 rounded-xl shadow-md transition flex items-center gap-2">
+                <button onclick="openGitModal()" class="text-xs font-bold bg-slate-900/80 hover:bg-slate-800 text-slate-200 px-3.5 py-2 rounded-xl shadow-md transition flex items-center gap-2">
                     <i class="fa-brands fa-git-alt text-orange-400"></i> Install CI/CD Hooks
                 </button>
                 <span class="flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-900/80 px-4 py-2 rounded-full shadow-lg shadow-black/30">
@@ -259,23 +259,34 @@ def index():
         </div>
     </div>
 
-    <!-- Custom Knowledge Ingestion Modal -->
-    <div id="modalKnowledge" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+    <!-- Git Integration & CI/CD Configuration Modal -->
+    <div id="modalGit" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
         <div class="glass-card rounded-3xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
             <div class="flex items-center justify-between">
-                <h3 class="text-lg font-bold text-white"><i class="fa-solid fa-brain text-sky-400 me-2"></i>Ingest Custom Vulnerability Rule</h3>
-                <button onclick="closeKnowledgeModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+                <h3 class="text-lg font-bold text-white"><i class="fa-brands fa-git-alt text-orange-400 me-2"></i>Git CI/CD & GitHub PR Configuration</h3>
+                <button onclick="closeGitModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+                Configure your target GitHub repository and branch. SafeCode-AI will install local pre-commit hooks, generate GitHub Action workflows, and create automated PRs.
+            </p>
             <div class="space-y-3">
-                <input type="text" id="customTitle" placeholder="Vulnerability Title (e.g. Custom Auth Bypass)" class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner">
-                <input type="text" id="customCat" placeholder="Category (INJECTION, CRYPTOGRAPHY_CREDENTIALS, etc.)" class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner" value="INJECTION">
-                <textarea id="customDesc" rows="3" placeholder="Vulnerability Description..." class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner"></textarea>
-                <textarea id="customCode" rows="4" placeholder="Sample Vulnerable Code..." class="w-full bg-slate-950 text-sky-300 font-mono text-xs p-3 rounded-xl shadow-inner"></textarea>
+                <div>
+                    <label class="text-xs font-bold text-slate-400 mb-1 block">Target GitHub Repository (Owner/Repo):</label>
+                    <input type="text" id="gitRepo" value="barnabas47/SafeCode-AI" placeholder="e.g. barnabas47/SafeCode-AI" class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner font-mono">
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-slate-400 mb-1 block">Target Branch:</label>
+                    <input type="text" id="gitBranch" value="main" placeholder="main" class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner font-mono">
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-slate-400 mb-1 block">GitHub Access Token (Optional for live API PRs):</label>
+                    <input type="password" id="gitToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" class="w-full bg-slate-950 text-slate-200 text-sm p-3 rounded-xl shadow-inner font-mono">
+                </div>
             </div>
-            <button onclick="submitKnowledgeIngestion()" class="w-full py-3 rounded-xl font-bold bg-sky-600 hover:bg-sky-500 text-white shadow-lg transition">
-                Submit & Auto-Synthesize Rule
+            <button onclick="submitGitIntegration()" class="w-full py-3 rounded-xl font-bold bg-gradient-to-r from-orange-500 to-amber-600 hover:opacity-90 text-white shadow-lg transition">
+                <i class="fa-brands fa-git-alt me-1.5"></i> Install Pre-Commit Hooks & Generate CI/CD Workflows
             </button>
-            <div id="knowledgeStatus" class="text-xs"></div>
+            <div id="gitStatus" class="text-xs space-y-1"></div>
         </div>
     </div>
 
@@ -337,14 +348,35 @@ def index():
             }}
         }}
 
-        async function installGitIntegration() {{
-            alert("Installing SafeCode-AI Pre-Commit Hook & GitHub Action Workflow...");
+        function openGitModal() {{ document.getElementById("modalGit").classList.remove("hidden"); }}
+        function closeGitModal() {{ document.getElementById("modalGit").classList.add("hidden"); }}
+
+        async function submitGitIntegration() {{
+            const statusDiv = document.getElementById("gitStatus");
+            const repo = document.getElementById("gitRepo").value;
+            const branch = document.getElementById("gitBranch").value;
+            
+            statusDiv.innerHTML = '<div class="text-amber-400 font-semibold mt-2"><i class="fa-solid fa-spinner fa-spin me-1.5"></i> Installing hooks & generating GitHub Actions...</div>';
+            
             try {{
-                const res = await fetch("/api/git/install-hook", {{ method: "POST" }});
+                const res = await fetch("/api/git/install-hook", {{
+                    method: "POST",
+                    headers: {{ "Content-Type": "application/json" }},
+                    body: JSON.stringify({{ repo, branch }})
+                }});
                 const data = await res.json();
-                alert("Git Integration Installed Successfully!\\n\\n1. Pre-commit Hook: " + (data.hook_status.message || "Installed") + "\\n2. GitHub Action: " + (data.workflow_status.message || "Generated"));
-            }} catch(e) {{
-                alert("Git Install Failed: " + e.message);
+                
+                statusDiv.innerHTML = `
+                    <div class="p-3 rounded-xl bg-emerald-950/80 text-emerald-300 space-y-1.5 shadow-md mt-2">
+                        <div class="font-bold flex items-center gap-1.5"><i class="fa-solid fa-circle-check"></i> Git CI/CD Setup Installed Successfully!</div>
+                        <div>1. Pre-Commit Hook: <code class="text-xs font-mono text-slate-200">.git/hooks/pre-commit</code></div>
+                        <div>2. GitHub Action: <code class="text-xs font-mono text-slate-200">.github/workflows/safecode-audit.yml</code></div>
+                        <div>3. Remote Target: <span class="font-semibold text-amber-300">${{escapeHtml(repo)}}</span> (branch: ${{escapeHtml(branch)}})</div>
+                    </div>
+                `;
+                setTimeout(closeGitModal, 3500);
+            }} catch(err) {{
+                statusDiv.innerHTML = `<div class="text-rose-400 mt-2 font-semibold">Install Failed: ${{escapeHtml(err.message)}}</div>`;
             }}
         }}
 
