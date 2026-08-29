@@ -73,6 +73,14 @@ class GitInstallRequest(BaseModel):
     branch: Optional[str] = "main"
     token: Optional[str] = None
 
+class GitPushFileRequest(BaseModel):
+    repo: str
+    file_path: str
+    file_content: str
+    commit_message: Optional[str] = None
+    branch: Optional[str] = "main"
+    token: Optional[str] = None
+
 @app.get("/", response_class=HTMLResponse)
 def index():
     presets_json = json.dumps(PRESETS_DATA)
@@ -83,7 +91,7 @@ def index():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SafeCode-AI | Enterprise Security Platform</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
     <script>
         tailwind.config = {{
@@ -451,13 +459,18 @@ def index():
 
                     <!-- Stage 2: Complete Refactored Code -->
                     <div class="p-4 rounded-2xl bg-slate-950/50 space-y-2 shadow-md">
-                        <div class="flex items-center justify-between">
+                        <div class="flex items-center justify-between flex-wrap gap-2">
                             <span class="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
                                 <i class="fa-solid fa-code-compare text-amber-400"></i> Stage 2: Refactored Source Code (Zero Regression)
                             </span>
-                            <button id="btnCopyCode" onclick="copyRefactoredCode()" class="text-xs font-bold px-3 py-1 rounded-xl bg-amber-950/90 hover:bg-amber-900 text-amber-300 transition flex items-center gap-1.5 shadow-md cursor-pointer">
-                                <i class="fa-solid fa-copy text-xs"></i> Copy Fixed Code
-                            </button>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <button id="btnCopyCode" onclick="copyRefactoredCode()" class="text-xs font-bold px-3 py-1 rounded-xl bg-amber-950/90 hover:bg-amber-900 text-amber-300 transition flex items-center gap-1.5 shadow-md cursor-pointer">
+                                    <i class="fa-solid fa-copy text-xs"></i> Copy Fixed Code
+                                </button>
+                                <button id="btnPushFile" onclick="pushRefactoredCodeToGithub()" class="text-xs font-bold px-3 py-1 rounded-xl bg-indigo-950/90 hover:bg-indigo-900 text-indigo-300 transition flex items-center gap-1.5 shadow-md cursor-pointer">
+                                    <i class="fa-solid fa-cloud-arrow-up text-xs text-sky-400"></i> Push Fixed File to GitHub
+                                </button>
+                            </div>
                         </div>
                         <div class="text-[11px] text-emerald-400 font-mono font-semibold bg-emerald-950/40 px-3 py-1.5 rounded-lg flex items-center gap-2">
                             <i class="fa-solid fa-circle-check"></i> Complete refactored code – replace your vulnerable function/file with this output
@@ -514,6 +527,46 @@ def index():
             }}).catch(e => {{
                 alert("Copy failed: " + e.message);
             }});
+        }}
+
+        async function pushRefactoredCodeToGithub() {{
+            if (!window.currentPatchCode) return;
+            const repoInput = document.getElementById("gitRepo");
+            const tokenInput = document.getElementById("gitToken");
+            const defaultRepo = repoInput && repoInput.value ? repoInput.value : "barnabas47/nebius_test";
+            const token = tokenInput ? tokenInput.value : "";
+
+            const targetRepo = prompt("Enter target GitHub repository (full URL or owner/repo):", defaultRepo);
+            if (!targetRepo) return;
+
+            const filePath = prompt("Enter target file path in repository (e.g. src/vulnerable_code.py):", "src/refactored_code.py") || "src/refactored_code.py";
+            const btn = document.getElementById("btnPushFile");
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-xs me-1"></i> Uploading to GitHub...';
+
+            try {{
+                const res = await fetch("/api/git/push-file", {{
+                    method: "POST",
+                    headers: {{ "Content-Type": "application/json" }},
+                    body: JSON.stringify({{
+                        repo: targetRepo,
+                        file_path: filePath,
+                        file_content: window.currentPatchCode,
+                        token: token,
+                        branch: "main"
+                    }})
+                }});
+                const data = await res.json();
+                if (data.success) {{
+                    if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400 me-1"></i> Pushed to GitHub!';
+                    alert("Successfully uploaded refactored file to GitHub!\\n\\nView on GitHub: " + data.html_url);
+                }} else {{
+                    if (btn) btn.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-rose-400 me-1"></i> Push Failed';
+                    alert("Upload failed: " + (data.message || data.error));
+                }}
+            }} catch(err) {{
+                if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-xmark text-rose-400 me-1"></i> Error';
+                alert("Error pushing to GitHub: " + err.message);
+            }}
         }}
 
         async function runClaimProcess() {{
@@ -587,6 +640,21 @@ def install_git_hook_endpoint(req: Optional[GitInstallRequest] = None):
             "workflow_status": wf_res,
             "push_status": push_res
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/git/push-file")
+def push_file_endpoint(req: GitPushFileRequest):
+    try:
+        result = git_engine.push_file_to_github(
+            target_repo=req.repo,
+            file_path=req.file_path,
+            file_content=req.file_content,
+            commit_message=req.commit_message,
+            branch=req.branch,
+            token=req.token
+        )
+        return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

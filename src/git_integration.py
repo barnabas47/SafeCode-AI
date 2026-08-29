@@ -221,7 +221,24 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
         except urllib.error.HTTPError as e:
             err_body = e.read().decode("utf-8", errors="ignore")
             logger.error(f"GitHub API Upload HTTP {e.code}: {err_body}")
-            msg = f"GitHub API HTTP {e.code}: Repository '{clean_repo}' not found on GitHub. Check repository name or token permissions." if e.code == 404 else f"GitHub API HTTP {e.code}: Token authentication error."
+
+            # If empty repository conflict (HTTP 409), retry without branch parameter to initialize main
+            if e.code == 409 or "empty" in err_body.lower():
+                try:
+                    payload_no_branch = {"message": "ci(safecode): initial commit & security audit workflow", "content": b64_content}
+                    req_retry = urllib.request.Request(url, data=json.dumps(payload_no_branch).encode("utf-8"), headers=req_headers, method="PUT")
+                    with urllib.request.urlopen(req_retry) as resp_retry:
+                        res_retry = json.loads(resp_retry.read().decode("utf-8"))
+                        return {
+                            "success": True,
+                            "target_repo": clean_repo,
+                            "target_url": f"https://github.com/{clean_repo}",
+                            "message": f"Successfully initialized empty repository https://github.com/{clean_repo} with safecode-audit.yml"
+                        }
+                except Exception as retry_err:
+                    logger.error(f"Retry on empty repo failed: {retry_err}")
+
+            msg = f"GitHub API HTTP {e.code}: Repository '{clean_repo}' not found on GitHub. Check repository name or token permissions." if e.code == 404 else f"GitHub API HTTP {e.code}: Token authentication error ({err_body})."
             return {
                 "success": False,
                 "target_repo": clean_repo,
@@ -230,6 +247,104 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
             }
         except Exception as e:
             logger.error(f"GitHub API Upload failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def push_file_to_github(self, target_repo: str, file_path: str, file_content: str, commit_message: str = None, branch: str = "main", token: str = None) -> Dict[str, Any]:
+        """
+        Directly uploads/creates any refactored file (e.g. src/vulnerable_service.py) into target GitHub repository via GitHub API.
+        """
+        import json
+        import base64
+        import urllib.request
+        import urllib.error
+
+        clean_repo = target_repo.replace("https://github.com/", "").strip("/").rstrip(".git")
+        parts = clean_repo.split("/")
+        owner = parts[0] if len(parts) > 0 else ""
+        repo_name = parts[1] if len(parts) > 1 else clean_repo
+
+        clean_file_path = file_path.strip("/").lstrip("./")
+        if not clean_file_path:
+            clean_file_path = "src/refactored_code.py"
+
+        if not commit_message:
+            commit_message = f"security(safecode): autonomous refactor fix for {os.path.basename(clean_file_path)}"
+
+        b64_content = base64.b64encode(file_content.encode("utf-8")).decode("utf-8")
+
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "SafeCode-AI-Engine"
+        }
+        if token and token.strip() and not token.startswith("ghp_xxx"):
+            headers["Authorization"] = f"Bearer {token.strip()}"
+
+        url = f"https://api.github.com/repos/{owner}/{repo_name}/contents/{clean_file_path}"
+
+        # Fetch existing SHA if file exists
+        existing_sha = None
+        try:
+            req_get = urllib.request.Request(f"{url}?ref={branch}", headers=headers, method="GET")
+            with urllib.request.urlopen(req_get) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                existing_sha = data.get("sha")
+        except Exception:
+            pass
+
+        payload = {
+            "message": commit_message,
+            "content": b64_content,
+            "branch": branch
+        }
+        if existing_sha:
+            payload["sha"] = existing_sha
+
+        payload_bytes = json.dumps(payload).encode("utf-8")
+        req_headers = {**headers, "Content-Type": "application/json"}
+
+        try:
+            req_put = urllib.request.Request(url, data=payload_bytes, headers=req_headers, method="PUT")
+            with urllib.request.urlopen(req_put) as resp:
+                res_data = json.loads(resp.read().decode("utf-8"))
+                content_info = res_data.get("content", {})
+                html_url = content_info.get("html_url", f"https://github.com/{owner}/{repo_name}/blob/{branch}/{clean_file_path}")
+                return {
+                    "success": True,
+                    "target_repo": f"{owner}/{repo_name}",
+                    "file_path": clean_file_path,
+                    "html_url": html_url,
+                    "message": f"Successfully uploaded {clean_file_path} to https://github.com/{owner}/{repo_name} (branch: {branch})"
+                }
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="ignore")
+            logger.error(f"GitHub API File Upload HTTP {e.code}: {err_body}")
+
+            # If empty repository conflict (HTTP 409), retry without branch parameter
+            if e.code == 409 or "empty" in err_body.lower():
+                try:
+                    payload_no_branch = {"message": commit_message, "content": b64_content}
+                    req_retry = urllib.request.Request(url, data=json.dumps(payload_no_branch).encode("utf-8"), headers=req_headers, method="PUT")
+                    with urllib.request.urlopen(req_retry) as resp_retry:
+                        res_retry = json.loads(resp_retry.read().decode("utf-8"))
+                        content_retry = res_retry.get("content", {})
+                        return {
+                            "success": True,
+                            "target_repo": f"{owner}/{repo_name}",
+                            "file_path": clean_file_path,
+                            "html_url": content_retry.get("html_url", f"https://github.com/{owner}/{repo_name}"),
+                            "message": f"Successfully uploaded {clean_file_path} to empty repository https://github.com/{owner}/{repo_name}"
+                        }
+                except Exception as retry_err:
+                    logger.error(f"Retry on empty repo failed: {retry_err}")
+
+            return {
+                "success": False,
+                "target_repo": f"{owner}/{repo_name}",
+                "error": f"HTTP {e.code}: {err_body}",
+                "message": f"GitHub API HTTP {e.code}: {err_body}"
+            }
+        except Exception as e:
+            logger.error(f"GitHub API File Upload failed: {e}")
             return {"success": False, "error": str(e)}
 
     def push_to_remote_github(self, target_repo: str, branch: str = "main", token: str = None) -> Dict[str, Any]:
