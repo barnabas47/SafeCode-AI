@@ -135,15 +135,95 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
             "body": body
         }
 
+    def upload_workflow_via_github_api(self, clean_repo: str, branch: str = "main", token: str = None) -> Dict[str, Any]:
+        """
+        Uses GitHub REST API (PUT /repos/{owner}/{repo}/contents/{path}) to directly upload
+        .github/workflows/safecode-audit.yml into any target repository without git history conflicts.
+        """
+        import json
+        import base64
+        import urllib.request
+        import urllib.error
+
+        workflow_file = os.path.join(self.repo_dir, ".github", "workflows", "safecode-audit.yml")
+        if not os.path.exists(workflow_file):
+            self.generate_github_action()
+
+        with open(workflow_file, "r", encoding="utf-8") as f:
+            content_str = f.read()
+
+        b64_content = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
+
+        url = f"https://api.github.com/repos/{clean_repo}/contents/.github/workflows/safecode-audit.yml"
+        headers = {
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "SafeCode-AI-Engine"
+        }
+        if token and token.strip() and not token.startswith("ghp_xxx"):
+            headers["Authorization"] = f"Bearer {token.strip()}"
+
+        # Check if file exists to fetch existing sha for updating
+        existing_sha = None
+        try:
+            req_get = urllib.request.Request(f"{url}?ref={branch}", headers=headers, method="GET")
+            with urllib.request.urlopen(req_get) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                existing_sha = data.get("sha")
+        except Exception:
+            pass
+
+        payload = {
+            "message": "ci(safecode): add autonomous security audit GitHub Action workflow",
+            "content": b64_content,
+            "branch": branch
+        }
+        if existing_sha:
+            payload["sha"] = existing_sha
+
+        payload_bytes = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+        try:
+            req_put = urllib.request.Request(url, data=payload_bytes, headers=headers, method="PUT")
+            with urllib.request.urlopen(req_put) as resp:
+                res_data = json.loads(resp.read().decode("utf-8"))
+                commit_html = res_data.get("commit", {}).get("html_url", f"https://github.com/{clean_repo}")
+                return {
+                    "success": True,
+                    "target_repo": clean_repo,
+                    "target_url": f"https://github.com/{clean_repo}/tree/{branch}/.github/workflows",
+                    "commit_url": commit_html,
+                    "message": f"Successfully created .github/workflows/safecode-audit.yml in https://github.com/{clean_repo} (branch: {branch})"
+                }
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode("utf-8", errors="ignore")
+            logger.error(f"GitHub API Upload HTTP {e.code}: {err_body}")
+            return {
+                "success": False,
+                "target_repo": clean_repo,
+                "error": f"HTTP {e.code}: {err_body}",
+                "message": f"GitHub API returned HTTP {e.code}. Check repository permissions or token validity."
+            }
+        except Exception as e:
+            logger.error(f"GitHub API Upload failed: {e}")
+            return {"success": False, "error": str(e)}
+
     def push_to_remote_github(self, target_repo: str, branch: str = "main", token: str = None) -> Dict[str, Any]:
         """
-        Commits .github/workflows/safecode-audit.yml and pushes it to the specified remote GitHub repository.
+        Commits .github/workflows/safecode-audit.yml and uploads it to target GitHub repository via API or Git CLI.
         """
-        import subprocess
-
         clean_repo = target_repo.replace("https://github.com/", "").strip("/").rstrip(".git")
         if not clean_repo:
             return {"success": False, "error": "Invalid repository format"}
+
+        # 1. Try GitHub REST API first if token is provided
+        if token and token.strip() and not token.startswith("ghp_xxx"):
+            api_res = self.upload_workflow_via_github_api(clean_repo, branch, token)
+            if api_res.get("success"):
+                return api_res
+
+        # 2. Fallback to local git CLI push
+        import subprocess
 
         remote_url = f"https://github.com/{clean_repo}.git"
         if token and token.strip() and not token.startswith("ghp_xxx"):
@@ -154,13 +234,9 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
             git_binary = "git"
 
         try:
-            # Stage the workflow file
             subprocess.run([git_binary, "add", ".github/workflows/safecode-audit.yml"], cwd=self.repo_dir, check=False)
-            
-            # Commit workflow file
             subprocess.run([git_binary, "commit", "-m", f"ci(safecode): add autonomous security audit GitHub Action for {clean_repo}"], cwd=self.repo_dir, check=False)
 
-            # Push to remote repository branch
             push_res = subprocess.run([git_binary, "push", remote_url, f"HEAD:{branch}"], cwd=self.repo_dir, capture_output=True, text=True)
 
             if push_res.returncode == 0 or "Everything up-to-date" in push_res.stderr or "Everything up-to-date" in push_res.stdout:
@@ -172,12 +248,17 @@ This Pull Request was generated autonomously by **SafeCode-AI** running NVIDIA N
                     "message": f"Successfully pushed safecode-audit.yml to https://github.com/{clean_repo} (branch: {branch})"
                 }
             else:
+                # Try API as final fallback
+                api_res = self.upload_workflow_via_github_api(clean_repo, branch, token)
+                if api_res.get("success"):
+                    return api_res
+                    
                 logger.warning(f"Git push returned non-zero exit code: {push_res.stderr}")
                 return {
                     "success": False,
                     "target_repo": clean_repo,
                     "error": push_res.stderr or push_res.stdout or "Push failed",
-                    "message": f"Workflow generated locally. Remote push to https://github.com/{clean_repo} requires write permissions or GitHub Personal Access Token."
+                    "message": f"Workflow generated locally. Remote push to https://github.com/{clean_repo} requires write permissions or GitHub Access Token."
                 }
         except Exception as e:
             logger.error(f"Failed pushing to remote repository: {e}")
