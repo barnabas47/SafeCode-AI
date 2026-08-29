@@ -59,13 +59,25 @@ class NebiusTokenFactoryClient:
 
     def _mock_response(self, prompt: str, model: str) -> str:
         p_lower = prompt.lower()
+        code_start = prompt.find("Code: ")
+        code_in_prompt = prompt[code_start + 6:].strip() if code_start != -1 else ""
+        code_lower = code_in_prompt.lower()
         
-        # Check vulnerability context
-        is_ssrf = "ssrf" in p_lower or "fetch_url" in p_lower or "request" in p_lower
-        is_cmd = "command" in p_lower or "system" in p_lower or "ping_host" in p_lower or "subprocess" in p_lower
+        # Check vulnerability context from code snippet specifically
+        is_sqli = "select " in code_lower or "sql" in p_lower or "query_user_records" in code_lower or "cursor.execute" in code_lower
+        is_ssrf = "ssrf" in p_lower or "requests.get(" in code_lower or "fetch_url" in code_lower
+        is_cmd = ("os.system(" in code_lower or "ping " in code_lower or "child_process.exec" in code_lower) and not is_sqli
         
         if "Stage 1: Threat Architect" in prompt:
-            if is_ssrf:
+            if is_sqli:
+                return (
+                    "ROOT CAUSE ANALYSIS:\n"
+                    "- Vulnerability: SQL Injection via unsanitized string interpolation in SQL query execution.\n"
+                    "- Impact: Unauthenticated data exfiltration & arbitrary table queries.\n"
+                    "- Remediation Strategy: Replace string formatting with parameterized query tuples (`?`, `?`). "
+                    "Preserve exact return signature List[Tuple[int, str, str, str]]."
+                )
+            elif is_ssrf:
                 return (
                     "ROOT CAUSE ANALYSIS:\n"
                     "- Vulnerability: Server-Side Request Forgery (SSRF) via unvalidated user URL input.\n"
@@ -75,25 +87,30 @@ class NebiusTokenFactoryClient:
             elif is_cmd:
                 return (
                     "ROOT CAUSE ANALYSIS:\n"
-                    "- Vulnerability: Command Injection via unsanitized string formatting in os.system().\n"
+                    "- Vulnerability: Command Injection via unsanitized string formatting in shell execution.\n"
                     "- Impact: Arbitrary shell command execution on host server.\n"
                     "- Remediation Strategy: Replace shell invocation with subprocess.run() using argument array."
                 )
             else:
                 return (
                     "ROOT CAUSE ANALYSIS:\n"
-                    "- Vulnerability: SQL Injection via unsanitized string interpolation in query_user_records().\n"
-                    "- Impact: Unauthenticated data exfiltration & arbitrary table queries.\n"
-                    "- Remediation Strategy: Replace string formatting with parameterized query tuples (`?`, `?`). "
-                    "Preserve exact return signature List[Tuple[int, str, str, str]]."
+                    "- Vulnerability: Security flaw detected in AST statement evaluation.\n"
+                    "- Impact: Potential unauthenticated data manipulation.\n"
+                    "- Remediation Strategy: Apply input sanitization and parameterized boundaries."
                 )
 
         elif "Stage 2: Patch Engineer" in prompt:
-            # Extract code block from prompt if present
-            code_start = prompt.find("Code: ")
-            code_in_prompt = prompt[code_start + 6:].strip() if code_start != -1 else ""
+            if "query_user_records" in code_in_prompt or ("SELECT" in code_in_prompt and "f\"" in code_in_prompt):
+                patched = code_in_prompt.replace(
+                    'raw_sql = f"SELECT id, username, role, email FROM users WHERE username LIKE \'%{search_term}%\' AND role = \'{role_filter}\'"',
+                    '# REFACTORED (CWE-89 Fixed): Parameterized query prevents SQL Injection & preserves 4-tuple contract\n    safe_sql = "SELECT id, username, role, email FROM users WHERE username LIKE ? AND role = ?"'
+                ).replace(
+                    'cursor.execute(raw_sql)',
+                    'cursor.execute(safe_sql, (f"%{search_term}%", role_filter))'
+                )
+                return f"```python\n{patched}\n```"
 
-            if "ProfileService" in code_in_prompt or "ProfileExportRequest" in code_in_prompt:
+            elif "ProfileService" in code_in_prompt or "ProfileExportRequest" in code_in_prompt:
                 patched = code_in_prompt.replace(
                     'filter_clause = f"AND notes LIKE \'%{notes}%\'" if notes else ""',
                     '# REFACTORED (CWE-89 Fixed): Parameterized query prevents Second-Order SQLi\n        filter_params = (req.user_id, f"%{notes}%" if notes else "%")'
