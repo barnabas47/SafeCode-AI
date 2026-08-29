@@ -379,6 +379,8 @@ def index():
 
                 const catInfo = data.taxonomy_classification || {{}};
 
+                window.currentPatchCode = data.patch_code || "";
+
                 resDiv.innerHTML = `
                     <!-- Category Badge -->
                     <div class="p-4 rounded-2xl bg-indigo-950/50 flex items-center justify-between shadow-md">
@@ -394,9 +396,19 @@ def index():
                         <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed font-medium">${{escapeHtml(data.architect_analysis || '')}}</p>
                     </div>
 
-                    <!-- Stage 2: Code Diff -->
+                    <!-- Stage 2: Complete Refactored Code -->
                     <div class="p-4 rounded-2xl bg-slate-950/50 space-y-2 shadow-md">
-                        <span class="text-xs font-black text-amber-400 uppercase tracking-wider block">Stage 2: Refactored Code (Zero Regression)</span>
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-black text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fa-solid fa-code-compare text-amber-400"></i> Stage 2: Refactored Source Code (Zero Regression)
+                            </span>
+                            <button id="btnCopyCode" onclick="copyRefactoredCode()" class="text-xs font-bold px-3 py-1 rounded-xl bg-amber-950/90 hover:bg-amber-900 text-amber-300 transition flex items-center gap-1.5 shadow-md cursor-pointer">
+                                <i class="fa-solid fa-copy text-xs"></i> Copy Fixed Code
+                            </button>
+                        </div>
+                        <div class="text-[11px] text-emerald-400 font-mono font-semibold bg-emerald-950/40 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                            <i class="fa-solid fa-circle-check"></i> Complete refactored code – replace your vulnerable function/file with this output
+                        </div>
                         <pre><code class="language-python">${{escapeHtml(data.patch_code || '')}}</code></pre>
                     </div>
 
@@ -434,6 +446,21 @@ def index():
 
         function escapeHtml(str) {{
             return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }}
+
+        function copyRefactoredCode() {{
+            if (!window.currentPatchCode) return;
+            navigator.clipboard.writeText(window.currentPatchCode).then(() => {{
+                const btn = document.getElementById("btnCopyCode");
+                if (btn) {{
+                    btn.innerHTML = '<i class="fa-solid fa-check text-emerald-400 me-1"></i> Copied to Clipboard!';
+                    setTimeout(() => {{
+                        btn.innerHTML = '<i class="fa-solid fa-copy text-xs me-1"></i> Copy Fixed Code';
+                    }}, 2000);
+                }}
+            }}).catch(e => {{
+                alert("Copy failed: " + e.message);
+            }});
         }}
 
         async function runClaimProcess() {{

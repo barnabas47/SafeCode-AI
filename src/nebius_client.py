@@ -89,7 +89,55 @@ class NebiusTokenFactoryClient:
                 )
 
         elif "Stage 2: Patch Engineer" in prompt:
-            if is_ssrf:
+            # Extract code block from prompt if present
+            code_start = prompt.find("Code: ")
+            code_in_prompt = prompt[code_start + 6:].strip() if code_start != -1 else ""
+
+            if "ProfileService" in code_in_prompt or "ProfileExportRequest" in code_in_prompt:
+                patched = code_in_prompt.replace(
+                    'filter_clause = f"AND notes LIKE \'%{notes}%\'" if notes else ""',
+                    '# REFACTORED (CWE-89 Fixed): Parameterized query prevents Second-Order SQLi\n        filter_params = (req.user_id, f"%{notes}%" if notes else "%")'
+                ).replace(
+                    'results = self.db.execute(report_query).fetchall()',
+                    'results = self.db.execute(report_query, filter_params).fetchall()'
+                ).replace(
+                    'return hashlib.md5(raw.encode()).hexdigest()',
+                    '# REFACTORED (CWE-327 Fixed): Use SHA-256 instead of MD5\n        return hashlib.sha256(raw.encode()).hexdigest()'
+                )
+                return f"```python\n{patched}\n```"
+
+            elif "enrichResource" in code_in_prompt or "MetadataEnricher" in code_in_prompt:
+                patched = code_in_prompt.replace(
+                    '// Only basic scheme check – host validation is intentionally incomplete for "flexibility"',
+                    '// REFACTORED (CWE-918 Fixed): Enforce strict hostname validation to block SSRF & Cloud Metadata (169.254.169.254)\n    if (parsed.hostname === "169.254.169.254" || parsed.hostname.startsWith("10.") || parsed.hostname.startsWith("192.168.")) {\n      throw new Error("Access to cloud metadata or internal IP addresses forbidden");\n    }'
+                )
+                return f"```javascript\n{patched}\n```"
+
+            elif "deepMerge" in code_in_prompt or "FeatureFlagService" in code_in_prompt:
+                patched = code_in_prompt.replace(
+                    'if (key === \'__proto__\' || key === \'constructor\') {',
+                    '// REFACTORED (CWE-1321 Fixed): Freeze prototype & block reserved property reflection\n    if (key === \'__proto__\' || key === \'constructor\' || key === \'prototype\') {'
+                )
+                return f"```javascript\n{patched}\n```"
+
+            elif "SessionGateway" in code_in_prompt or "pickle.loads" in code_in_prompt:
+                patched = code_in_prompt.replace(
+                    'data = pickle.loads(raw)',
+                    '# REFACTORED (CWE-502 Fixed): Replace unsafe pickle with safe JSON deserialization\n            data = json.loads(raw.decode("utf-8"))'
+                ).replace(
+                    'SECRET_KEY = b"gateway-hmac-key-v2-change-me"',
+                    '# REFACTORED (CWE-798 Fixed): Load secret key from environment variable\nSECRET_KEY = os.getenv("GATEWAY_HMAC_SECRET", "default-safe-key").encode()'
+                )
+                return f"```python\n{patched}\n```"
+
+            elif "JobRequest" in code_in_prompt or "exec.CommandContext" in code_in_prompt:
+                patched = code_in_prompt.replace(
+                    'cmd := exec.CommandContext(ctx, "/bin/sh", "-c", cmdLine)',
+                    '// REFACTORED (CWE-78 Fixed): Execute binary directly with argument array (no shell expansion)\n\tcmd := exec.CommandContext(ctx, w.BinaryPath, "--name", req.JobName)'
+                )
+                return f"```go\n{patched}\n```"
+
+            elif is_ssrf:
                 return (
                     "```python\n"
                     "def fetch_url(url: str):\n"
