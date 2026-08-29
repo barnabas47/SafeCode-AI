@@ -577,6 +577,12 @@ def index():
                     if (btn) btn.innerHTML = '<i class="fa-solid fa-triangle-exclamation text-rose-400 me-1"></i> Push Failed';
                     alert("Upload failed: " + (data.message || data.error));
                 }}
+            }} catch(err) {{
+                if (btn) btn.innerHTML = '<i class="fa-solid fa-circle-xmark text-rose-400 me-1"></i> Error';
+                alert("Error pushing to GitHub: " + err.message);
+            }}
+        }}
+
         async function appendFixTxtToGithub() {{
             if (!window.currentPatchCode) return;
             const repoInput = document.getElementById("gitRepo");
