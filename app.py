@@ -320,10 +320,10 @@ def index():
                     }})
                 }});
                 const data = await res.json();
-                statusDiv.innerHTML = `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check me-1"></i> \${{data.message}}</span>`;
+                statusDiv.innerHTML = `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check me-1"></i> ${{data.message}}</span>`;
                 setTimeout(closeKnowledgeModal, 2000);
             }} catch(err) {{
-                statusDiv.innerHTML = `<span class="text-rose-400">Error: \${{err.message}}</span>`;
+                statusDiv.innerHTML = `<span class="text-rose-400">Error: ${{err.message}}</span>`;
             }}
         }}
 
@@ -371,7 +371,7 @@ def index():
                 badge.classList.remove("hidden");
 
                 if(data.executive_report && data.executive_report.filename) {{
-                    btnPdf.href = `/api/report/download/\${{data.executive_report.filename}}`;
+                    btnPdf.href = `/api/report/download/${{data.executive_report.filename}}`;
                     btnPdf.classList.remove("hidden");
                 }}
 
@@ -381,32 +381,32 @@ def index():
                     <!-- Category Badge -->
                     <div class="p-4 rounded-2xl bg-indigo-950/50 flex items-center justify-between shadow-md">
                         <span class="text-xs font-black text-indigo-300 uppercase tracking-wider">
-                            <i class="fa-solid fa-layer-group me-1.5"></i>Taxonomy: \${{catInfo.category_name || 'Injection'}}
+                            <i class="fa-solid fa-layer-group me-1.5"></i>Taxonomy: ${{catInfo.category_name || 'Injection'}}
                         </span>
-                        <span class="text-xs font-mono text-indigo-400 font-bold">\${{(catInfo.cwe_list || []).join(', ')}}</span>
+                        <span class="text-xs font-mono text-indigo-400 font-bold">${{(catInfo.cwe_list || []).join(', ')}}</span>
                     </div>
 
                     <!-- Stage 1 -->
                     <div class="p-4 rounded-2xl bg-slate-950/50 space-y-1.5 shadow-md">
                         <span class="text-xs font-black text-sky-400 uppercase tracking-wider block">Stage 1: Threat Architect Analysis</span>
-                        <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed font-medium">\${{escapeHtml(data.architect_analysis || '')}}</p>
+                        <p class="text-xs text-slate-300 whitespace-pre-line leading-relaxed font-medium">${{escapeHtml(data.architect_analysis || '')}}</p>
                     </div>
 
                     <!-- Stage 2: Code Diff -->
                     <div class="p-4 rounded-2xl bg-slate-950/50 space-y-2 shadow-md">
                         <span class="text-xs font-black text-amber-400 uppercase tracking-wider block">Stage 2: Refactored Code (Zero Regression)</span>
-                        <pre><code class="language-python">\${{escapeHtml(data.patch_code || '')}}</code></pre>
+                        <pre><code class="language-python">${{escapeHtml(data.patch_code || '')}}</code></pre>
                     </div>
 
                     <!-- Stage 3 & 4 Grid -->
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div class="p-4 rounded-2xl bg-slate-950/50 shadow-md">
                             <span class="text-xs font-black text-emerald-400 uppercase tracking-wider block mb-1">Stage 3: OpenShell Sandbox</span>
-                            <p class="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-medium">\${{escapeHtml(data.sandbox_verification || '')}}</p>
+                            <p class="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-medium">${{escapeHtml(data.sandbox_verification || '')}}</p>
                         </div>
                         <div class="p-4 rounded-2xl bg-slate-950/50 shadow-md">
                             <span class="text-xs font-black text-purple-400 uppercase tracking-wider block mb-1">Stage 4: Red-Team Attestation</span>
-                            <p class="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-medium">\${{escapeHtml(data.red_team_attestation || '')}}</p>
+                            <p class="text-xs text-slate-400 leading-relaxed whitespace-pre-line font-medium">${{escapeHtml(data.red_team_attestation || '')}}</p>
                         </div>
                     </div>
                 `;
@@ -420,7 +420,7 @@ def index():
             }} catch(err) {{
                 console.error("SafeCode Patch Execution Error:", err);
                 resDiv.innerHTML = `<div class="p-4 rounded-2xl bg-rose-950/80 text-rose-300 text-sm font-semibold shadow-lg">
-                    <i class="fa-solid fa-triangle-exclamation me-2"></i>Error Executing Audit: \${{escapeHtml(err.message || String(err))}}
+                    <i class="fa-solid fa-triangle-exclamation me-2"></i>Error Executing Audit: ${{escapeHtml(err.message || String(err))}}
                 </div>`;
             }} finally {{
                 btn.disabled = false;
@@ -447,10 +447,10 @@ def index():
                     }})
                 }});
                 const data = await res.json();
-                outDiv.innerHTML = `<pre><code class="language-json">\${{JSON.stringify(data, null, 2)}}</code></pre>`;
+                outDiv.innerHTML = `<pre><code class="language-json">${{JSON.stringify(data, null, 2)}}</code></pre>`;
                 try {{ if (window.Prism) Prism.highlightAll(); }} catch(e) {{}}
             }} catch(e) {{
-                outDiv.innerHTML = `<div class="p-4 rounded-2xl bg-rose-950/80 text-rose-300 text-sm font-semibold shadow-lg">\${{e.message}}</div>`;
+                outDiv.innerHTML = `<div class="p-4 rounded-2xl bg-rose-950/80 text-rose-300 text-sm font-semibold shadow-lg">${{e.message}}</div>`;
             }}
         }}
     </script>
